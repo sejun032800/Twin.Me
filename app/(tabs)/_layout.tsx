@@ -14,7 +14,7 @@ const SWIPE_MIN_VEL = 420;
 function pathnameToIndex(pathname: string): number {
   if (pathname.endsWith('/chat')) return 1;
   if (pathname.endsWith('/history')) return 2;
-  if (pathname.endsWith('/settings')) return 3;
+  if (pathname.includes('/settings')) return 3;
   return 0;
 }
 

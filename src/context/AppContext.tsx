@@ -7,6 +7,25 @@ import {
 
 export type { ChatStyleProfile };
 
+// ── Privacy Level ─────────────────────────────────────────────────────────────
+// 3 = 완전복제(Full Clone, default) · 2 = 최적화(Optimized) · 1 = 보호(Protected)
+export type PrivacyLevel = 1 | 2 | 3;
+
+// PII masking pipeline: runs in Lv3 before any text is stored
+export function maskPII(text: string): string {
+  return text
+    // Korean mobile / landline phone numbers
+    .replace(/\b0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}\b/g, '***')
+    // Bank account numbers (e.g. 110-123456-78-901)
+    .replace(/\d{3,6}[-\s]\d{6,10}[-\s]\d{2,3}(?:[-\s]\d{1,3})?/g, '***')
+    // Korean resident registration number (YYMMDD-NNNNNNN)
+    .replace(/\d{6}[-\s]\d{7}/g, '***')
+    // Card numbers (16-digit groups)
+    .replace(/\b\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}\b/g, '***')
+    // Bare long numeric strings (8+ digits — potential IDs / accounts)
+    .replace(/\b\d{8,}\b/g, '***');
+}
+
 export interface DateCourse {
   id: string;
   title: string;
@@ -65,9 +84,15 @@ interface AppContextValue {
   setInviteCode: (code: string) => void;
   trainingResult: TrainingResult | null;
   setTrainingResult: (result: TrainingResult) => void;
+  // Raw KakaoTalk file text — set by ingestion screen, consumed by loading screen
+  rawKakaoText: string | null;
+  setRawKakaoText: (text: string | null) => void;
   // Chat rhythm profile — derived from KakaoTalk analysis, updated via rolling avg
   chatStyleProfile: ChatStyleProfile;
   setChatStyleProfile: (p: ChatStyleProfile) => void;
+  // Privacy control (FUN-SET-001)
+  privacyLevel: PrivacyLevel;
+  setPrivacyLevel: (level: PrivacyLevel) => void;
   // Date course archive
   dateCourses: DateCourse[];
   addDateCourse: (course: DateCourse) => void;
@@ -128,8 +153,12 @@ const AppContext = createContext<AppContextValue>({
   setInviteCode: () => {},
   trainingResult: null,
   setTrainingResult: () => {},
+  rawKakaoText: null,
+  setRawKakaoText: () => {},
   chatStyleProfile: DEFAULT_CHAT_STYLE_PROFILE,
   setChatStyleProfile: () => {},
+  privacyLevel: 3,
+  setPrivacyLevel: () => {},
   dateCourses: MOCK_COURSES,
   addDateCourse: () => {},
   removeDateCourse: () => {},
@@ -143,7 +172,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
   const [inviteCode, setInviteCode] = useState('');
   const [trainingResult, setTrainingResult] = useState<TrainingResult | null>(null);
+  const [rawKakaoText, setRawKakaoText] = useState<string | null>(null);
   const [chatStyleProfile, setChatStyleProfile] = useState<ChatStyleProfile>(DEFAULT_CHAT_STYLE_PROFILE);
+  const [privacyLevel, setPrivacyLevel] = useState<PrivacyLevel>(3);
   const [dateCourses, setDateCourses] = useState<DateCourse[]>(MOCK_COURSES);
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
@@ -171,8 +202,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setInviteCode,
         trainingResult,
         setTrainingResult,
+        rawKakaoText,
+        setRawKakaoText,
         chatStyleProfile,
         setChatStyleProfile,
+        privacyLevel,
+        setPrivacyLevel,
         dateCourses,
         addDateCourse,
         removeDateCourse,

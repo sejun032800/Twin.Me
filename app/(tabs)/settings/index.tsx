@@ -1,9 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
+  Linking,
   Modal,
   PanResponder,
   Pressable,
@@ -14,7 +16,6 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
-  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -25,7 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppContext } from '../../src/context/AppContext';
+import { PrivacyLevel, useAppContext } from '../../../src/context/AppContext';
 import {
   Colors,
   FontSize,
@@ -36,7 +37,7 @@ import {
   TabBar,
   ThemeMode,
   ThemeTokens,
-} from '../../src/styles/theme';
+} from '../../../src/styles/theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -161,77 +162,85 @@ const tS = StyleSheet.create({
   },
 });
 
-// ─── Privacy Slider ───────────────────────────────────────────────────────────
+// ─── Privacy Slider (FUN-SET-001) ────────────────────────────────────────────
 
 const PRIVACY_STAGES = [
   {
-    key: 'love',
-    label: '찐사랑',
-    emoji: '💜',
-    desc: 'AI가 상대방 에이전트에게 모든 감정 데이터를 공유해요. 완전한 투명 관계 모드.',
-    color: '#7C3AED',
-  },
-  {
-    key: 'push',
-    label: '밀당',
-    emoji: '😏',
-    desc: '일상과 스케줄만 공유. 깊은 속마음은 나만 알아요.',
-    color: '#D946EF',
-  },
-  {
-    key: 'secret',
-    label: '비밀',
-    emoji: '🔒',
-    desc: '철벽 방어 모드. AI 간 통신을 완전히 차단해요.',
+    key: 'full_clone',
+    snapLabel: '💖 완전복제',
+    emoji: '💖',
+    desc: '당신의 대화 습관과 관심사를 모두 학습하여\n거울처럼 완벽하게 동기화합니다.',
     color: '#FF6B8B',
+    level: 3 as PrivacyLevel,
+    badge: 'Lv 3',
+  },
+  {
+    key: 'optimized',
+    snapLabel: '🎭 최적화',
+    emoji: '🎭',
+    desc: '말투는 더 이상 학습하지 않지만, 대화의 맥락을\n분석해 완벽한 데이트 코스를 제안합니다.',
+    color: '#D946EF',
+    level: 2 as PrivacyLevel,
+    badge: 'Lv 2',
+  },
+  {
+    key: 'protected',
+    snapLabel: '🤫 보호',
+    emoji: '🤫',
+    desc: '실시간 데이터 수집을 전면 차단합니다.\nAI는 오직 온보딩 때 입력된 기본 데이터만 기억합니다.',
+    color: '#7C3AED',
+    level: 1 as PrivacyLevel,
+    badge: 'Lv 1',
   },
 ] as const;
 
 type PrivacyStage = 0 | 1 | 2;
 
 function PrivacySlider({ t }: { t: ThemeTokens }) {
-  const [stage, setStage] = useState<PrivacyStage>(1);
-  const prevStage = useRef<PrivacyStage>(1);
+  const { privacyLevel, setPrivacyLevel } = useAppContext();
+
+  const initialStage = (3 - privacyLevel) as PrivacyStage;
+
   const TRACK_W = SCREEN_W - Spacing.base * 2 - Spacing.md * 2;
-  const KNOB_SIZE = 32;
+  const KNOB_SIZE = 34;
   const KNOB_TRAVEL = TRACK_W - KNOB_SIZE;
-  const stagePositions = [0, KNOB_TRAVEL / 2, KNOB_TRAVEL];
+  const stagePositions: [number, number, number] = [0, KNOB_TRAVEL / 2, KNOB_TRAVEL];
 
-  const knobX = useSharedValue(stagePositions[1]);
-  const descOpacity = useSharedValue(1);
-  const glowColor = useSharedValue(0.5);
+  const [stage, setStage] = useState<PrivacyStage>(initialStage);
+  const prevStage = useRef<PrivacyStage>(initialStage);
 
-  const descTexts = useRef([
-    useSharedValue(0),
-    useSharedValue(1),
-    useSharedValue(0),
-  ]);
+  const knobX      = useSharedValue(stagePositions[initialStage]);
+  const glowColor  = useSharedValue(initialStage / 2);
+
+  const desc0 = useSharedValue(initialStage === 0 ? 1 : 0);
+  const desc1 = useSharedValue(initialStage === 1 ? 1 : 0);
+  const desc2 = useSharedValue(initialStage === 2 ? 1 : 0);
+  const descSVs = useRef([desc0, desc1, desc2]);
 
   const changeStage = (newStage: PrivacyStage) => {
     if (newStage === prevStage.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    descTexts.current[prevStage.current].value = withTiming(0, { duration: 150 });
-    descTexts.current[newStage].value = withDelay(100, withTiming(1, { duration: 200 }));
+    descSVs.current[prevStage.current].value = withTiming(0, { duration: 140 });
+    descSVs.current[newStage].value          = withDelay(100, withTiming(1, { duration: 210 }));
     glowColor.value = withTiming(newStage / 2, { duration: 300 });
     prevStage.current = newStage;
     setStage(newStage);
+    setPrivacyLevel((3 - newStage) as PrivacyLevel);
   };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        Haptics.selectionAsync();
-      },
+      onMoveShouldSetPanResponder:  () => true,
+      onPanResponderGrant: () => { Haptics.selectionAsync(); },
       onPanResponderMove: (_, gs) => {
-        const raw = stagePositions[prevStage.current] + gs.dx;
+        const raw     = stagePositions[prevStage.current] + gs.dx;
         const clamped = Math.max(0, Math.min(KNOB_TRAVEL, raw));
-        knobX.value = clamped;
+        knobX.value   = clamped;
 
         const pct = clamped / KNOB_TRAVEL;
         let ns: PrivacyStage = 1;
-        if (pct < 0.33) ns = 0;
+        if (pct < 0.33)      ns = 0;
         else if (pct > 0.67) ns = 2;
         runOnJS(changeStage)(ns);
       },
@@ -241,7 +250,7 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
           damping: 28,
         });
       },
-    })
+    }),
   ).current;
 
   const knobStyle = useAnimatedStyle(() => ({
@@ -252,65 +261,140 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
     width: knobX.value + KNOB_SIZE / 2,
   }));
 
-  const descStyles = [
-    useAnimatedStyle(() => ({ opacity: descTexts.current[0].value, position: 'absolute' })),
-    useAnimatedStyle(() => ({ opacity: descTexts.current[1].value, position: 'absolute' })),
-    useAnimatedStyle(() => ({ opacity: descTexts.current[2].value, position: 'absolute' })),
-  ];
+  const descStyle0 = useAnimatedStyle(() => ({ opacity: descSVs.current[0].value, position: 'absolute' as const }));
+  const descStyle1 = useAnimatedStyle(() => ({ opacity: descSVs.current[1].value, position: 'absolute' as const }));
+  const descStyle2 = useAnimatedStyle(() => ({ opacity: descSVs.current[2].value, position: 'absolute' as const }));
+  const descStyles = [descStyle0, descStyle1, descStyle2];
+
+  const currentStage = PRIVACY_STAGES[stage];
 
   return (
     <View style={[styles.card, { backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1 }]}>
       <View style={styles.cardHeader}>
-        <Text style={[styles.cardTitle, { color: t.text }]}>A2A 프라이버시 제어</Text>
-        <View style={[styles.stageBadge, { backgroundColor: PRIVACY_STAGES[stage].color + '22' }]}>
-          <Text style={[styles.stageBadgeText, { color: PRIVACY_STAGES[stage].color }]}>
-            {PRIVACY_STAGES[stage].emoji} {PRIVACY_STAGES[stage].label}
+        <View style={{ gap: 3 }}>
+          <Text style={[styles.cardTitle, { color: t.text }]}>프라이버시 컨트롤 센터</Text>
+          <Text style={[styles.cardSub, { color: t.textSecondary }]}>
+            AI 학습 데이터 수집 범위를 직접 제어하세요.
+          </Text>
+        </View>
+        <View style={[styles.stageBadge, { backgroundColor: currentStage.color + '22' }]}>
+          <Text style={[styles.stageBadgeText, { color: currentStage.color }]}>
+            {currentStage.badge}
           </Text>
         </View>
       </View>
-      <Text style={[styles.cardSub, { color: t.textSecondary }]}>내 AI가 상대방 AI에게 공유하는 데이터 범위를 설정해요.</Text>
 
-      {/* Track */}
+      <View style={[styles.snapLabelsRow, { marginBottom: 6 }]}>
+        {PRIVACY_STAGES.map((s, i) => (
+          <Pressable
+            key={s.key}
+            style={styles.snapLabelWrap}
+            onPress={() => {
+              const ns = i as PrivacyStage;
+              knobX.value = withSpring(stagePositions[ns], { stiffness: 320, damping: 28 });
+              changeStage(ns);
+            }}
+          >
+            <Text
+              style={[
+                styles.snapLabelText,
+                { color: stage === i ? s.color : t.textMuted },
+                stage === i && { fontWeight: FontWeight.bold },
+              ]}
+            >
+              {s.snapLabel}
+            </Text>
+            {stage === i && (
+              <View style={[styles.snapDot, { backgroundColor: s.color }]} />
+            )}
+          </Pressable>
+        ))}
+      </View>
+
       <View style={styles.sliderContainer}>
-        <View style={[styles.sliderTrack, { backgroundColor: t.isLight ? 'rgba(180,140,160,0.15)' : 'rgba(255,255,255,0.08)' }]}>
-          <Animated.View style={[styles.sliderFill, trackFillStyle]} />
-          <Animated.View style={[styles.sliderKnob, knobStyle]} {...panResponder.panHandlers}>
+        <View
+          style={[
+            styles.sliderTrack,
+            {
+              backgroundColor: t.isLight
+                ? 'rgba(180,140,160,0.15)'
+                : 'rgba(255,255,255,0.08)',
+            },
+          ]}
+        >
+          <Animated.View style={[styles.sliderFill, trackFillStyle]}>
             <LinearGradient
-              colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+              colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+
+          {stagePositions.map((pos, i) => (
+            <View
+              key={i}
+              style={[
+                styles.snapTick,
+                {
+                  left: pos + KNOB_SIZE / 2 - 1,
+                  backgroundColor: stage === i
+                    ? PRIVACY_STAGES[i].color
+                    : t.isLight ? 'rgba(120,80,100,0.25)' : 'rgba(255,255,255,0.18)',
+                },
+              ]}
+            />
+          ))}
+
+          <Animated.View
+            style={[styles.sliderKnob, knobStyle]}
+            {...panResponder.panHandlers}
+          >
+            <LinearGradient
+              colors={['#FF6B8B', '#D946EF', '#7C3AED']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.knobGradient}
             >
-              <Text style={styles.knobEmoji}>{PRIVACY_STAGES[stage].emoji}</Text>
+              <Text style={styles.knobEmoji}>{currentStage.emoji}</Text>
             </LinearGradient>
           </Animated.View>
         </View>
-
-        {/* Stage labels */}
-        <View style={styles.sliderLabels}>
-          {PRIVACY_STAGES.map((s, i) => (
-            <Pressable key={s.key} onPress={() => {
-              const ns = i as PrivacyStage;
-              knobX.value = withSpring(stagePositions[ns], { stiffness: 320, damping: 28 });
-              changeStage(ns);
-            }}>
-              <Text style={[styles.sliderLabel, { color: t.textMuted }, stage === i && { color: t.text, fontWeight: FontWeight.bold }]}>
-                {s.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
       </View>
 
-      {/* Description with fade */}
       <View style={styles.descBox}>
         {PRIVACY_STAGES.map((s, i) => (
-          <Animated.Text key={s.key} style={[styles.descText, { color: t.textSecondary }, descStyles[i]]}>
+          <Animated.Text
+            key={s.key}
+            style={[styles.descText, { color: t.textSecondary }, descStyles[i]]}
+          >
             {s.desc}
           </Animated.Text>
         ))}
-        {/* Spacer to give height */}
         <Text style={[styles.descText, { opacity: 0 }]}>{PRIVACY_STAGES[0].desc}</Text>
+      </View>
+
+      <View
+        style={[
+          styles.pipelineStrip,
+          {
+            backgroundColor: t.isLight
+              ? currentStage.color + '14'
+              : currentStage.color + '1A',
+            borderColor: currentStage.color + '40',
+          },
+        ]}
+      >
+        <Text style={{ fontSize: 13 }}>
+          {stage === 0 ? '🟢' : stage === 1 ? '🟡' : '🔴'}
+        </Text>
+        <Text style={[styles.pipelineText, { color: currentStage.color }]}>
+          {stage === 0
+            ? '말투 학습 활성 · PII 마스킹 적용 중'
+            : stage === 1
+            ? '말투 학습 일시 중단 · 데이트 뮤즈 컨텍스트 수집 유지'
+            : '모든 실시간 수집 차단 · 온보딩 데이터만 사용'}
+        </Text>
       </View>
     </View>
   );
@@ -405,7 +489,6 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
         <Text style={[styles.cardSub, { color: t.textSecondary }]}>AI가 학습한 모든 데이터를 벡터 DB에서 영구 파기해요.</Text>
       </View>
 
-      {/* Memory list */}
       {dissolving ? (
         <View style={styles.dissolveZone}>
           {particles.map((p) => (
@@ -440,7 +523,6 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
         </Animated.View>
       )}
 
-      {/* Confirm Modal */}
       <Modal visible={showModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: t.card }]}>
@@ -534,7 +616,6 @@ function PlanCard({ plan }: { plan: typeof PLANS[number] }) {
 
   return (
     <Animated.View style={[styles.planCardWrapper, cardStyle]}>
-      {/* Gradient border glow */}
       <Animated.View style={[StyleSheet.absoluteFill, borderStyle]}>
         <LinearGradient
           colors={['#7C3AED', '#D946EF', '#FF6B8B']}
@@ -618,7 +699,6 @@ function SubscriptionStore() {
 
   return (
     <View style={styles.storeSection}>
-      {/* Breathing banner */}
       <Animated.View style={[styles.storeBanner, bannerStyle]}>
         <LinearGradient
           colors={['#7C3AED', '#D946EF', '#FF6B8B']}
@@ -634,7 +714,6 @@ function SubscriptionStore() {
         </LinearGradient>
       </Animated.View>
 
-      {/* Plan cards */}
       <View style={styles.planList}>
         {PLANS.map((plan) => (
           <PlanCard key={plan.id} plan={plan} />
@@ -666,6 +745,300 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
     </View>
   );
 }
+
+// ─── Menu Item (Shared) ───────────────────────────────────────────────────────
+
+function MenuItem({
+  t,
+  iconEmoji,
+  iconBgColor,
+  label,
+  desc,
+  onPress,
+  externalLink = false,
+  isLast = false,
+}: {
+  t: ThemeTokens;
+  iconEmoji: string;
+  iconBgColor: string;
+  label: string;
+  desc?: string;
+  onPress: () => void;
+  externalLink?: boolean;
+  isLast?: boolean;
+}) {
+  return (
+    <>
+      <Pressable
+        style={({ pressed }) => [mS.row, pressed && { opacity: 0.6 }]}
+        onPress={onPress}
+      >
+        <View style={[mS.iconWrap, { backgroundColor: iconBgColor }]}>
+          <Text style={mS.iconEmoji}>{iconEmoji}</Text>
+        </View>
+        <View style={mS.labelWrap}>
+          <Text style={[mS.label, { color: t.text }]}>{label}</Text>
+          {desc ? <Text style={[mS.desc, { color: t.textSecondary }]}>{desc}</Text> : null}
+        </View>
+        <Text style={[mS.chevron, { color: t.textMuted }]}>
+          {externalLink ? '↗' : '›'}
+        </Text>
+      </Pressable>
+      {!isLast && <View style={[mS.divider, { backgroundColor: t.cardBorder }]} />}
+    </>
+  );
+}
+
+const mS = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: Spacing.md,
+  },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconEmoji: {
+    fontSize: 18,
+  },
+  labelWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  label: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.medium,
+  },
+  desc: {
+    fontSize: FontSize.xs,
+    lineHeight: 16,
+  },
+  chevron: {
+    fontSize: 22,
+    fontWeight: '300' as const,
+    lineHeight: 24,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 56,
+  },
+});
+
+// ─── Account Center Section ───────────────────────────────────────────────────
+
+function AccountCenterSection({ t }: { t: ThemeTokens }) {
+  const router = useRouter();
+
+  const items = [
+    {
+      id: 'personal-info',
+      emoji: '👤',
+      bg: 'rgba(124,58,237,0.15)',
+      label: '개인 정보',
+      desc: '이름 · 이메일 · 생년월일',
+      route: '/settings/personal-info',
+    },
+    {
+      id: 'security',
+      emoji: '🔐',
+      bg: 'rgba(217,70,239,0.15)',
+      label: '비밀번호 및 보안',
+      desc: '비밀번호 변경 · 2단계 인증 · 로그인 활동',
+      route: '/settings/security',
+    },
+    {
+      id: 'data-permissions',
+      emoji: '🗄️',
+      bg: 'rgba(56,189,248,0.15)',
+      label: '내 정보 및 권한',
+      desc: '데이터 다운로드 · 검색 기록 · 앱 권한',
+      route: '/settings/data-permissions',
+    },
+  ];
+
+  return (
+    <View style={[acS.card, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+      <View style={acS.header}>
+        <Text style={[acS.sectionLabel, { color: t.textMuted }]}>계정 센터</Text>
+        <Text style={[acS.subtitle, { color: t.textSecondary }]}>
+          Twin.me 경험을 통합적으로 관리하세요.
+        </Text>
+      </View>
+      {items.map((item, i) => (
+        <MenuItem
+          key={item.id}
+          t={t}
+          iconEmoji={item.emoji}
+          iconBgColor={item.bg}
+          label={item.label}
+          desc={item.desc}
+          isLast={i === items.length - 1}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push(item.route as any);
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+const acS = StyleSheet.create({
+  card: {
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md,
+    paddingBottom: 4,
+    borderWidth: 1,
+    ...Shadows.card,
+  },
+  header: {
+    gap: 4,
+    marginBottom: 4,
+  },
+  sectionLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  subtitle: {
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+  },
+});
+
+// ─── Support & Legal Section ──────────────────────────────────────────────────
+
+function SupportLegalSection({ t }: { t: ThemeTokens }) {
+  const router = useRouter();
+
+  const items = [
+    {
+      id: 'help',
+      emoji: '❓',
+      bg: 'rgba(74,222,128,0.15)',
+      label: '도움말 센터',
+      desc: '자주 묻는 질문 및 고객 지원',
+      external: true,
+      onPress: () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        Linking.openURL('https://twin.me/help').catch(() => {});
+      },
+    },
+    {
+      id: 'privacy-policy',
+      emoji: '📄',
+      bg: 'rgba(251,191,36,0.15)',
+      label: '개인정보 처리방침',
+      desc: '데이터 수집 · 이용 · 보호 방침',
+      external: false,
+      onPress: () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push('/settings/privacy-policy' as any);
+      },
+    },
+    {
+      id: 'terms',
+      emoji: '📋',
+      bg: 'rgba(148,163,184,0.15)',
+      label: '서비스 이용약관',
+      desc: '서비스 제공 조건 및 이용 규칙',
+      external: false,
+      onPress: () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push('/settings/terms' as any);
+      },
+    },
+  ];
+
+  return (
+    <View style={[acS.card, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+      <View style={acS.header}>
+        <Text style={[acS.sectionLabel, { color: t.textMuted }]}>지원 및 법률</Text>
+      </View>
+      {items.map((item, i) => (
+        <MenuItem
+          key={item.id}
+          t={t}
+          iconEmoji={item.emoji}
+          iconBgColor={item.bg}
+          label={item.label}
+          desc={item.desc}
+          externalLink={item.external}
+          isLast={i === items.length - 1}
+          onPress={item.onPress}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ─── Settings Footer ──────────────────────────────────────────────────────────
+
+function SettingsFooter({ t }: { t: ThemeTokens }) {
+  const handleLogout = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      '로그아웃',
+      'Twin.me에서 로그아웃하시겠어요?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '로그아웃',
+          style: 'destructive',
+          onPress: () => {
+            // TODO: clear session & navigate to splash
+          },
+        },
+      ],
+    );
+  };
+
+  return (
+    <View style={ftS.container}>
+      <Text style={[ftS.version, { color: t.textMuted }]}>Twin.me version 2.4.0</Text>
+      <Pressable
+        style={({ pressed }) => [ftS.logoutBtn, pressed && { opacity: 0.7 }]}
+        onPress={handleLogout}
+      >
+        <Text style={ftS.logoutText}>로그아웃</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const ftS = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingTop: Spacing.sm,
+  },
+  version: {
+    fontSize: FontSize.xs,
+    letterSpacing: 0.3,
+  },
+  logoutBtn: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    backgroundColor: 'rgba(239,68,68,0.06)',
+    alignItems: 'center',
+  },
+  logoutText: {
+    color: Colors.ALERT_SIREN_RED,
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.3,
+  },
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -701,6 +1074,18 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>프리미엄 플랜</Text>
           <SubscriptionStore />
         </View>
+
+        <View style={styles.sectionBlock}>
+          <AccountCenterSection t={t} />
+        </View>
+
+        <View style={styles.sectionBlock}>
+          <SupportLegalSection t={t} />
+        </View>
+
+        <View style={styles.sectionBlock}>
+          <SettingsFooter t={t} />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -718,7 +1103,6 @@ const styles = StyleSheet.create({
     gap: Spacing.xl,
   },
 
-  // ── Profile Header ──
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -750,7 +1134,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Section ──
   sectionBlock: {
     gap: Spacing.sm,
     paddingHorizontal: Spacing.base,
@@ -762,7 +1145,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  // ── Card ──
   card: {
     borderRadius: Radius.lg,
     padding: Spacing.md,
@@ -792,9 +1174,27 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
 
-  // ── Slider ──
+  snapLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  snapLabelWrap: {
+    alignItems: 'center',
+    gap: 3,
+    flex: 1,
+  },
+  snapLabelText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.medium,
+    textAlign: 'center',
+  },
+  snapDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
   sliderContainer: {
-    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   sliderTrack: {
     height: 6,
@@ -805,44 +1205,58 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: '100%',
     borderRadius: Radius.pill,
-    backgroundColor: Colors.GRADIENT_MID,
+    overflow: 'hidden',
+  },
+  snapTick: {
+    position: 'absolute',
+    width: 2,
+    height: 12,
+    top: -3,
+    borderRadius: 1,
   },
   sliderKnob: {
     position: 'absolute',
-    top: -13,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    top: -14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     ...Shadows.glow,
   },
   knobGradient: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  knobEmoji: { fontSize: 14 },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: Spacing.sm,
-  },
-  sliderLabel: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.medium,
-  },
+  knobEmoji: { fontSize: 15 },
   descBox: {
-    minHeight: 42,
+    minHeight: 48,
     position: 'relative',
     justifyContent: 'center',
+    marginTop: 4,
   },
   descText: {
     fontSize: FontSize.sm,
     lineHeight: 20,
   },
+  pipelineStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  pipelineText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.medium,
+    flex: 1,
+    lineHeight: 16,
+  },
 
-  // ── Danger Card ──
   dangerCard: {
     borderRadius: Radius.lg,
     borderWidth: 1,
@@ -908,7 +1322,6 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
 
-  // ── Modal ──
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.75)',
@@ -958,7 +1371,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
   },
 
-  // ── Store ──
   storeSection: { gap: Spacing.md },
   storeBanner: { borderRadius: Radius.lg, overflow: 'hidden' },
   storeBannerGrad: {

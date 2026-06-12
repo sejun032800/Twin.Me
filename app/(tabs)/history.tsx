@@ -25,8 +25,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import KakaoMapView from '../../src/components/KakaoMapView';
+import HistoryKakaoMapView from '../../src/components/history/KakaoMapView';
 import { DateCourse, RecommendedPlace, useAppContext } from '../../src/context/AppContext';
+import { HistoryProvider, useHistoryContext } from '../../src/context/HistoryContext';
+import { usePhotoMetadata } from '../../src/hooks/usePhotoMetadata';
 import {
   FontSize,
   FontWeight,
@@ -1023,7 +1025,7 @@ function StarParticleOverlay() {
     <View
       pointerEvents="none"
       style={[
-        StyleSheet.absoluteFillObject,
+        StyleSheet.absoluteFill,
         { zIndex: 20, backgroundColor: 'rgba(10,13,26,0.38)', alignItems: 'center', justifyContent: 'center' },
       ]}
     >
@@ -1075,7 +1077,7 @@ function AuroraMuseFAB({ onPress, bottom }: { onPress: () => void; bottom: numbe
       {/* Aurora pulse ring */}
       <Animated.View
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { borderRadius: 28 },
           glowStyle,
         ]}
@@ -1341,20 +1343,31 @@ const museS = StyleSheet.create({
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
-  const { dateCourses, partnerProfile, bulkAddDateCourses } = useAppContext();
-  const [addVisible, setAddVisible]         = useState(false);
-  const [museVisible, setMuseVisible]       = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState<DateCourse | null>(null);
+  const { dateCourses, partnerProfile, bulkAddDateCourses, privacyLevel } = useAppContext();
+  const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
+  const { pickPhoto } = usePhotoMetadata();
+  const [addVisible, setAddVisible]           = useState(false);
+  const [museVisible, setMuseVisible]         = useState(false);
+  const [selectedCourse, setSelectedCourse]   = useState<DateCourse | null>(null);
   const [recommendations, setRecommendations] = useState<RecommendedPlace[] | null>(null);
-  const [isLoadingAI, setIsLoadingAI]       = useState(false);
+  const [isLoadingAI, setIsLoadingAI]         = useState(false);
 
-  // ── AI Muse orchestration ──────────────────────────────────────────────────
+  // Map center fallback for photos without GPS: use first registered course or Seoul centre
+  const mapCenter = dateCourses.length > 0
+    ? { lat: dateCourses[0].latitude, lng: dateCourses[0].longitude }
+    : { lat: 37.5512, lng: 126.9882 };
+
+  // ── AI Muse orchestration (privacyLevel guard) ────────────────────────────
+  // Lv3 (완전복제): full date-history context passed to AI
+  // Lv2 (최적화):   context allowed — style learning is blocked in chat.tsx
+  // Lv1 (보호):     context aggregation terminated → empty dataset
   const handleMuseSubmit = async (ootd: string, mood: string) => {
     setIsLoadingAI(true);
     setRecommendations(null);
     setSelectedCourse(null);
     try {
-      const result = await fetchAIDateCourse(dateCourses, ootd, mood);
+      const contextCourses = privacyLevel === 1 ? [] : dateCourses;
+      const result = await fetchAIDateCourse(contextCourses, ootd, mood);
       setRecommendations(result);
     } finally {
       setIsLoadingAI(false);
@@ -1380,17 +1393,32 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     setRecommendations(null);
   };
 
-  const FAB_BOTTOM       = STATS_BAR_H + TabBar.height + 16;
-  const MUSE_FAB_BOTTOM  = FAB_BOTTOM + 62;
+  // ── Photo upload FAB handler ───────────────────────────────────────────────
+  // Adds new PhotoMeta to HistoryContext, then triggers a smooth camera panTo.
+  const handlePhotoUpload = () => {
+    pickPhoto(
+      (meta) => {
+        addHistoryPlace(meta);
+        panMapTo(meta.lat, meta.lng);
+      },
+      mapCenter,
+    );
+  };
+
+  const FAB_BOTTOM        = STATS_BAR_H + TabBar.height + 16;
+  const PHOTO_FAB_BOTTOM  = FAB_BOTTOM + 62;
+  const MUSE_FAB_BOTTOM   = PHOTO_FAB_BOTTOM + 62;
 
   return (
     <View style={[mapV.root, { backgroundColor: t.bg }]}>
       {/* ── Map canvas ── */}
       <View style={[mapV.mapContainer, { height: MAP_H }]}>
-        <KakaoMapView
+        <HistoryKakaoMapView
           courses={dateCourses}
+          photos={historyPlaces}
           onMarkerPress={(c) => { setSelectedCourse(c); setRecommendations(null); }}
           recommendedPlaces={recommendations ?? undefined}
+          panTarget={mapPanTarget}
         />
 
         {/* Star particle loading overlay */}
@@ -1481,8 +1509,42 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         </ScrollView>
       )}
 
-      {/* ── AI Muse FAB (aurora, above + FAB) ── */}
+      {/* ── Privacy level badge (shown when collection is restricted) ── */}
+      {privacyLevel < 3 && (
+        <View
+          style={{
+            position: 'absolute',
+            right: Spacing.base + 4,
+            bottom: MUSE_FAB_BOTTOM + 60,
+            backgroundColor: privacyLevel === 1 ? 'rgba(248,113,113,0.92)' : 'rgba(251,191,36,0.92)',
+            borderRadius: Radius.pill,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+          }}
+          pointerEvents="none"
+        >
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+            {privacyLevel === 1 ? '🔴 수집 차단' : '🟡 학습 일시 중단'}
+          </Text>
+        </View>
+      )}
+
+      {/* ── AI Muse FAB (aurora, above photo FAB) ── */}
       <AuroraMuseFAB onPress={() => setMuseVisible(true)} bottom={MUSE_FAB_BOTTOM} />
+
+      {/* ── 📸 추억 사진 올리기 FAB ── */}
+      <Pressable
+        style={[mapV.fab, { bottom: PHOTO_FAB_BOTTOM }]}
+        onPress={handlePhotoUpload}
+      >
+        <LinearGradient
+          colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={mapV.fabGrad}
+        >
+          <Text style={mapV.fabTxt}>📸 추억 사진 올리기</Text>
+        </LinearGradient>
+      </Pressable>
 
       {/* ── + 코스 추가 FAB ── */}
       <Pressable
@@ -1653,7 +1715,7 @@ const archS = StyleSheet.create({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export default function HistoryScreen() {
+function HistoryScreenContent() {
   const [activeTab, setActiveTab] = useState<TabKey>('archive');
   const { themeTokens } = useAppContext();
   const t = themeTokens;
@@ -1669,6 +1731,16 @@ export default function HistoryScreen() {
         <DateMapView t={t} />
       )}
     </SafeAreaView>
+  );
+}
+
+// HistoryProvider wraps only this screen so its state doesn't pollute the
+// global AppContext and is automatically reset when the tab unmounts.
+export default function HistoryScreen() {
+  return (
+    <HistoryProvider>
+      <HistoryScreenContent />
+    </HistoryProvider>
   );
 }
 

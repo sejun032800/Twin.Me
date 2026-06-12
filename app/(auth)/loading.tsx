@@ -263,7 +263,7 @@ const PERSONA_STEPS = 32;
 
 export default function LoadingScreen() {
   const router = useRouter();
-  const { myProfile, setTrainingResult, setChatStyleProfile } = useAppContext();
+  const { myProfile, setTrainingResult, setChatStyleProfile, rawKakaoText, setRawKakaoText } = useAppContext();
 
   const [pct, setPct] = useState(0);
   const [toneStatus, setToneStatus] = useState<Status>('running');
@@ -279,13 +279,16 @@ export default function LoadingScreen() {
   useEffect(() => {
     const myName = myProfile.name || '세준';
 
+    // Use real uploaded file if available, otherwise demo corpus
+    const corpus = rawKakaoText ?? DEMO_CORPUS;
+
     // ── Run the actual parse synchronously (result is ready immediately) ──
-    const parsed = parseKakaoExport(DEMO_CORPUS, myName);
+    const parsed = parseKakaoExport(corpus, myName);
     // Extract chat rhythm profile from the same corpus
-    const chatProfile = analyzeChatRhythm(DEMO_CORPUS, myName);
+    const chatProfile = analyzeChatRhythm(corpus, myName);
 
     // ── Phase 1: Tone Extraction — replay line-by-line at human pace ──
-    const rawLines = DEMO_CORPUS.split('\n').filter((l) => l.trim().length > 0);
+    const rawLines = corpus.split('\n').filter((l) => l.trim().length > 0);
     const totalLines = rawLines.length;
     const msPerLine = TONE_PHASE_MS / totalLines;
 
@@ -346,6 +349,9 @@ export default function LoadingScreen() {
               myLineCount: parsed.myLines.length,
               maskedCount: parsed.maskedCount,
             });
+
+            // Clear raw file text from context — no longer needed after parsing
+            setRawKakaoText(null);
 
             setTimeout(() => router.replace('/(auth)/complete'), 520);
           }

@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   Image,
   KeyboardAvoidingView,
@@ -26,9 +27,21 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import HistoryKakaoMapView from '../../src/components/history/KakaoMapView';
+import { KakaoPlace, searchPlacesByKeyword } from '../../src/services/kakaoService';
+import { requestMuseCourse } from '../../src/services/aiMuseService';
+import { fetchCurrentWeather } from '../../src/services/weatherService';
+import type { WeatherData } from '../../src/services/weatherService';
 import { DateCourse, RecommendedPlace, useAppContext } from '../../src/context/AppContext';
 import { HistoryProvider, useHistoryContext } from '../../src/context/HistoryContext';
 import { usePhotoMetadata } from '../../src/hooks/usePhotoMetadata';
+import { useMemoryWall, MemoryNode } from '../../src/hooks/useMemoryWall';
+import { usePartnerPlaceReview } from '../../src/hooks/usePartnerPlaceReview';
+import { useCoupleLiveStats } from '../../src/hooks/useCoupleLiveStats';
+import {
+  gatherDateShuttleContext,
+  requestDateShuttleRecommendation,
+} from '../../src/services/dateShuttleService';
+import type { ShuttleResult } from '../../src/services/dateShuttleService';
 import {
   FontSize,
   FontWeight,
@@ -40,17 +53,7 @@ import {
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
-// ─── Mock Polaroid Data ───────────────────────────────────────────────────────
-
-const MEMORIES = [
-  { id: '1', date: '2024.01.20', quote: '처음 봤는데 왜 이렇게 편하지..?',           tag: '첫 만남'   },
-  { id: '2', date: '2024.02.14', quote: '빼빼로 내가 살게 ㅎㅎ 기다려',              tag: '발렌타인'  },
-  { id: '3', date: '2024.03.31', quote: '한복 입으면 진짜 너무 예쁠 것 같은데',        tag: '봄 나들이'  },
-  { id: '4', date: '2024.05.02', quote: '벌써 100일이야 시간 왜 이렇게 빠르지',        tag: '100일'     },
-  { id: '5', date: '2024.07.27', quote: '파도 소리 들으면서 영원히 있고 싶다',          tag: '여름 여행'  },
-  { id: '6', date: '2024.12.24', quote: '내년에도 여기 같이 오자 약속',               tag: '크리스마스' },
-  { id: '7', date: '2025.01.20', quote: '1년 동안 옆에 있어줘서 진짜 고마워',          tag: '1주년'     },
-];
+// MEMORIES 하드코딩 → useMemoryWall 훅으로 대체됨 (Step #24)
 
 const FOOD_CHIPS = ['🍣 일식', '🍜 중식', '🥩 한식', '🍕 양식', '🧋 카페'];
 const MOOD_CHIPS = ['💃 액티비티', '🌿 힐링', '🎬 문화생활', '🍻 술자리'];
@@ -60,177 +63,12 @@ const OOTD_OPTIONS = [
   { icon: '👫', label: '시밀러룩' },
 ];
 
-// ─── FUN-CHA-004: AI Date Muse Constants ─────────────────────────────────────
+// ─── FUN-CHA-004: AI Date Muse chip options ──────────────────────────────────
+// SPOT_POOL 12개 하드코딩 및 fetchAIDateCourse() 가짜 딜레이 → Step #29에서 완파
+// 실제 파이프라인은 src/services/aiMuseService.ts의 requestMuseCourse() 사용
 
 const AI_OOTD_CHIPS = ['캐주얼', '시크', '스트릿', '페미닌'];
 const AI_MOOD_CHIPS = ['차분함', '신남', '로맨틱', '힐링'];
-
-interface SpotTemplate {
-  title: string;
-  category: string;
-  lat: number;
-  lng: number;
-  ootdTags: string[];
-  moodTags: string[];
-  reasonTemplate: string;
-}
-
-const SPOT_POOL: SpotTemplate[] = [
-  {
-    title: '성수 어니언 (인더스트리얼 카페)',
-    category: '☕ 카페',
-    lat: 37.5448, lng: 127.0558,
-    ootdTags: ['시크', '캐주얼'],
-    moodTags: ['차분함', '로맨틱'],
-    reasonTemplate: '{ootd} 무드에 완벽한 인더스트리얼 감성 공간이에요. "{favTitle}" 방문 이력과 취향 패턴이 딱 맞아요.',
-  },
-  {
-    title: '한남 그라운드 루프탑 다이닝',
-    category: '🍽️ 레스토랑',
-    lat: 37.5338, lng: 127.0014,
-    ootdTags: ['시크', '페미닌'],
-    moodTags: ['로맨틱', '신남'],
-    reasonTemplate: '야경이 펼쳐지는 루프탑에서 {mood} 분위기를 만끽할 수 있어요. "{favTitle}" 별점 패턴과 일치하는 프리미엄 코스예요.',
-  },
-  {
-    title: '삼청동 더오르 갤러리 카페',
-    category: '🎨 갤러리·카페',
-    lat: 37.5814, lng: 126.9808,
-    ootdTags: ['시크', '페미닌'],
-    moodTags: ['차분함', '힐링'],
-    reasonTemplate: '아트와 카페가 만나는 삼청동의 숨겨진 명소예요. {ootd} 스타일에 딱 맞는 공간입니다.',
-  },
-  {
-    title: '홍대 스카이랩 루프탑바',
-    category: '🍹 루프탑바',
-    lat: 37.5540, lng: 126.9213,
-    ootdTags: ['스트릿', '캐주얼'],
-    moodTags: ['신남', '로맨틱'],
-    reasonTemplate: '홍대 권역 방문 이력이 많으시네요. 루프탑에서 {mood} 분위기로 밤을 마무리해 보세요!',
-  },
-  {
-    title: '연남동 땡스오트 (비건 브런치)',
-    category: '🥗 브런치',
-    lat: 37.5601, lng: 126.9249,
-    ootdTags: ['캐주얼', '페미닌'],
-    moodTags: ['힐링', '차분함'],
-    reasonTemplate: '한적한 골목의 감성 브런치예요. {mood} 무드로 하루를 시작하기에 최적의 코스입니다.',
-  },
-  {
-    title: '반포 달빛무지개분수 야경',
-    category: '🌊 한강 야경',
-    lat: 37.5125, lng: 127.0046,
-    ootdTags: ['캐주얼', '스트릿'],
-    moodTags: ['로맨틱', '신남'],
-    reasonTemplate: '두 분의 한강 방문 이력이 확인돼요. 야간 분수쇼와 함께 {mood} 데이트 하이라이트로 딱이에요!',
-  },
-  {
-    title: '망원 이자카야 긴자',
-    category: '🍶 이자카야',
-    lat: 37.5553, lng: 126.9009,
-    ootdTags: ['스트릿', '캐주얼'],
-    moodTags: ['신남', '차분함'],
-    reasonTemplate: '"{favTitle}" 방문 때 술자리를 즐기셨던 패턴이 보여요. 망원 감성 이자카야에서 {mood} 무드를 이어가 보세요.',
-  },
-  {
-    title: '서울숲 피크닉 & 팝업마켓',
-    category: '🌳 피크닉',
-    lat: 37.5444, lng: 127.0377,
-    ootdTags: ['캐주얼', '스트릿'],
-    moodTags: ['힐링', '신남'],
-    reasonTemplate: '{ootd} 차림으로 피크닉하기에 완벽해요. 주말 팝업마켓까지 함께하면 {mood} 분위기 완성!',
-  },
-  {
-    title: '압구정 플레이그라운드 디저트',
-    category: '🍰 디저트',
-    lat: 37.5273, lng: 127.0253,
-    ootdTags: ['페미닌', '시크'],
-    moodTags: ['로맨틱', '힐링'],
-    reasonTemplate: '인스타 감성 디저트 공간이에요. {ootd} 룩과 함께 포토포인트를 공략해 보세요 📸',
-  },
-  {
-    title: '이태원 와인바 아빠구름',
-    category: '🍷 와인바',
-    lat: 37.5349, lng: 126.9959,
-    ootdTags: ['시크', '페미닌'],
-    moodTags: ['로맨틱', '차분함'],
-    reasonTemplate: '차분하고 감성적인 와인 공간이에요. {mood} 데이트를 우아하게 마무리하기에 완벽한 코스입니다.',
-  },
-  {
-    title: '북서울꿈의숲 야경 전망대',
-    category: '🌿 전망대',
-    lat: 37.6295, lng: 127.0547,
-    ootdTags: ['캐주얼', '페미닌'],
-    moodTags: ['힐링', '로맨틱'],
-    reasonTemplate: '서울 북부의 숨겨진 야경 명소예요. {mood} 분위기로 긴 산책을 즐기기에 최적의 장소입니다.',
-  },
-  {
-    title: '을지로 힙지로 카페 투어',
-    category: '☕ 힙카페',
-    lat: 37.5657, lng: 126.9928,
-    ootdTags: ['스트릿', '시크'],
-    moodTags: ['차분함', '신남'],
-    reasonTemplate: '을지로 특유의 레트로·힙 감성이 {ootd} 스타일과 환상 조합이에요. "{favTitle}" 분위기와 비슷한 바이브가 나요.',
-  },
-];
-
-// ─── FUN-CHA-004: LLM Orchestration Mock ─────────────────────────────────────
-
-async function fetchAIDateCourse(
-  dateCourses: DateCourse[],
-  ootd: string,
-  mood: string,
-): Promise<RecommendedPlace[]> {
-  // Simulate LLM API round-trip latency (2.4s realistic wait)
-  await new Promise<void>((resolve) => setTimeout(resolve, 2400));
-
-  // ── Context Aggregation (Few-Shot Context Packing) ────────────────────────
-  const sortedByRating = [...dateCourses].sort(
-    (a, b) => (b.myRating + b.partnerRating) - (a.myRating + a.partnerRating),
-  );
-  const favTitle = sortedByRating[0]?.title ?? '성수동';
-
-  const visitedTitles = new Set(dateCourses.map((c) => c.title.split(' ')[0]));
-
-  // ── Pattern Matching & Scoring ────────────────────────────────────────────
-  const candidates = SPOT_POOL
-    .filter((s) => !visitedTitles.has(s.title.split(' ')[0]))
-    .map((s) => ({
-      ...s,
-      score:
-        (s.ootdTags.includes(ootd) ? 2 : 0) +
-        (s.moodTags.includes(mood) ? 2 : 0) +
-        Math.random() * 0.7,
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  // Fallback: if pool exhausted, reuse all
-  const pool = candidates.length >= 3 ? candidates : SPOT_POOL.slice(0, 3).map((s) => ({ ...s, score: 0 }));
-  const top3 = pool.slice(0, 3);
-
-  const labels = ['도보 5~8분', '도보 12~15분', '대중교통 15~20분'];
-
-  return top3.map((s, i) => ({
-    id: `ai-${Date.now()}-${i}`,
-    title: s.title,
-    latitude: s.lat + (Math.random() - 0.5) * 0.0008,
-    longitude: s.lng + (Math.random() - 0.5) * 0.0008,
-    reason: s.reasonTemplate
-      .replace('{favTitle}', favTitle)
-      .replace('{ootd}', ootd)
-      .replace('{mood}', mood),
-    estimatedTime: labels[i],
-    category: s.category,
-  }));
-}
-
-const PARTNER_MOCK_REVIEWS = [
-  '분위기가 너무 좋았어',
-  '다음에 또 오고 싶다',
-  '음식이 진짜 맛있었어',
-  '같이 와서 더 좋았어',
-  '여기 내 최애 장소됐어',
-];
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
 
@@ -239,19 +77,49 @@ const CARD_IMG = CARD_W - 16;
 const H_PAD    = 12;
 const USABLE_X = Math.max(0, SW - CARD_W - H_PAD * 2);
 
-const SCATTER = [
-  { xFrac: 0.02, y: 10,  rot: -5.2 },
-  { xFrac: 0.94, y: 28,  rot:  4.1 },
-  { xFrac: 0.44, y: 195, rot: -1.8 },
-  { xFrac: 0.06, y: 228, rot:  6.5 },
-  { xFrac: 0.90, y: 392, rot: -3.7 },
-  { xFrac: 0.04, y: 422, rot:  2.3 },
-  { xFrac: 0.50, y: 580, rot: -6.1 },
-];
+// Seeded-deterministic scatter positions so layout is stable across re-renders.
+// Uses sin-based hash — no external PRNG dependency.
+function buildScatter(count: number): Array<{ xFrac: number; y: number; rot: number }> {
+  const slotH = (WALL_H - 200) / Math.max(count, 1);
+  return Array.from({ length: count }, (_, i) => {
+    const h1 = Math.abs(Math.sin(i * 37.13 + 1.77) * 9973) % 1;
+    const h2 = Math.abs(Math.sin(i * 53.71 + 3.14) * 9967) % 1;
+    const h3 = Math.abs(Math.sin(i * 29.53 + 2.71) * 9949) % 1;
+
+    // Alternate left / center / right columns for natural wall feel
+    const col = i % 3;
+    const xFrac =
+      col === 0 ? 0.02 + h1 * 0.07 :   // left: 2–9%
+      col === 1 ? 0.42 + h1 * 0.16 :   // centre: 42–58%
+                  0.86 + h1 * 0.08;    // right: 86–94%
+
+    const y   = Math.max(8, slotH * i + h2 * slotH * 0.55);
+    const rot = (h3 - 0.5) * 14; // ±7°
+
+    return { xFrac, y, rot };
+  });
+}
 
 const WALL_H      = 580 + 255;
 const STATS_BAR_H = 106;
 const MAP_H       = Math.min(SH * 0.46, 360);
+
+// ─── Route Polyline Utility ───────────────────────────────────────────────────
+// Converts a course-spots array into an ordered lat/lng coordinate chain for
+// Polyline rendering. Sorts by `date` field (ISO string) ascending so the path
+// follows the chronological date order. Returns [] when length <= 1 so the
+// map component can safely skip polyline geometry without a crash.
+
+function generateRoutePolylineSegments(
+  spots: Array<{ latitude: number; longitude: number; date?: string }>,
+): Array<{ latitude: number; longitude: number }> {
+  if (spots.length <= 1) return [];
+  const sorted = [...spots].sort((a, b) => {
+    if (!a.date || !b.date) return 0;
+    return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  });
+  return sorted.map(({ latitude, longitude }) => ({ latitude, longitude }));
+}
 
 // ─── Segmented Control ────────────────────────────────────────────────────────
 
@@ -321,19 +189,164 @@ const segS = StyleSheet.create({
   inactiveTxt: { fontSize: FontSize.sm, fontWeight: FontWeight.medium },
 });
 
+// ─── Polaroid gradient palettes (fallback when no real photo) ─────────────────
+// Each palette is drawn from Twin.me's brand neon spectrum.
+const CARD_PALETTES: [string, string, string][] = [
+  ['#7C3AED', '#D946EF', '#FF6B8B'],
+  ['#1E1B4B', '#4338CA', '#7C3AED'],
+  ['#831843', '#D946EF', '#F472B6'],
+  ['#0F172A', '#1E3A5F', '#38BDF8'],
+  ['#1A0A2E', '#6D28D9', '#A855F7'],
+  ['#0C1A20', '#0891B2', '#38BDF8'],
+  ['#1E0A12', '#E11D48', '#FF6B8B'],
+];
+
+// ─── MemoryDetailModal ────────────────────────────────────────────────────────
+
+function MemoryDetailModal({
+  node,
+  onClose,
+}: {
+  node: MemoryNode | null;
+  onClose: () => void;
+}) {
+  if (!node) return null;
+
+  return (
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <Pressable style={detailS.backdrop} onPress={onClose}>
+        <Pressable style={detailS.card} onPress={() => {}}>
+          {/* Photo or gradient header */}
+          {node.imageUri ? (
+            <Image
+              source={{ uri: node.imageUri }}
+              style={detailS.headerImg}
+              resizeMode="cover"
+            />
+          ) : (
+            <LinearGradient
+              colors={CARD_PALETTES[Number(node.id.replace(/\D/g, '')) % CARD_PALETTES.length]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={detailS.headerGrad}
+            >
+              <Text style={detailS.gradEmoji}>💬</Text>
+            </LinearGradient>
+          )}
+
+          {/* Content */}
+          <View style={detailS.body}>
+            <View style={detailS.tagRow}>
+              <View style={detailS.tagBadge}>
+                <Text style={detailS.tagBadgeText}>{node.tag}</Text>
+              </View>
+              <Text style={detailS.speakerText}>
+                {node.speaker === 'me' ? '내가 한 말' : '상대방이 한 말'}
+              </Text>
+            </View>
+
+            <Text style={detailS.quoteText}>
+              "{node.quote}"
+            </Text>
+
+            <Text style={detailS.dateText}>{node.date}</Text>
+
+            <Pressable style={detailS.closeBtn} onPress={onClose}>
+              <LinearGradient
+                colors={['#7C3AED', '#D946EF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={detailS.closeBtnGrad}
+              >
+                <Text style={detailS.closeBtnText}>닫기</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const detailS = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  card: {
+    width: '100%',
+    backgroundColor: '#1E293B',
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+  },
+  headerImg: { width: '100%', height: 200 },
+  headerGrad: {
+    width: '100%',
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradEmoji: { fontSize: 52 },
+  body: { padding: Spacing.lg, gap: Spacing.md },
+  tagRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  tagBadge: {
+    backgroundColor: 'rgba(124,58,237,0.25)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.4)',
+  },
+  tagBadgeText: { color: '#C084FC', fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
+  speakerText: { color: '#64748B', fontSize: FontSize.xs },
+  quoteText: {
+    color: '#F1F5F9',
+    fontSize: FontSize.lg,
+    fontStyle: 'italic',
+    lineHeight: 26,
+    letterSpacing: 0.2,
+  },
+  dateText: { color: '#475569', fontSize: FontSize.sm },
+  closeBtn: { borderRadius: Radius.xl, overflow: 'hidden', marginTop: 4 },
+  closeBtnGrad: { paddingVertical: 12, alignItems: 'center' },
+  closeBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
+});
+
 // ─── PolaroidCard ─────────────────────────────────────────────────────────────
 
 function PolaroidCard({
-  node, index, isActive, onActivate,
+  node,
+  index,
+  scatter,
+  onShowDetail,
 }: {
-  node: typeof MEMORIES[0];
+  node: MemoryNode;
   index: number;
-  isActive: boolean;
-  onActivate: (id: string | null) => void;
+  scatter: { xFrac: number; y: number; rot: number };
+  onShowDetail: (node: MemoryNode) => void;
 }) {
   const scale = useSharedValue(1);
-  const { xFrac, y, rot } = SCATTER[index];
+  const { xFrac, y, rot } = scatter;
   const left = H_PAD + xFrac * USABLE_X;
+
+  // Gradient palette index is stable per memory id
+  const paletteIdx = Number(node.id.replace(/\D/g, '0') || 0) % CARD_PALETTES.length;
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: rot + 'deg' }, { scale: scale.value }],
@@ -343,21 +356,34 @@ function PolaroidCard({
     <Animated.View
       style={[
         polaS.card,
-        { left, top: y, zIndex: isActive ? 999 : index + 1, elevation: isActive ? 24 : 6 + index },
+        { left, top: y, zIndex: index + 1, elevation: 6 + index },
         animStyle,
       ]}
     >
       <Pressable
         onPressIn={() => { scale.value = withSpring(1.06, { damping: 10, stiffness: 260 }); }}
-        onPressOut={() => { scale.value = withSpring(1.0, { damping: 14, stiffness: 220 }); }}
-        onPress={() => onActivate(isActive ? null : node.id)}
-        onLongPress={() => onActivate(node.id)}
+        onPressOut={() => { scale.value = withSpring(1.0,  { damping: 14, stiffness: 220 }); }}
+        onPress={() => onShowDetail(node)}
+        onLongPress={() => onShowDetail(node)}
       >
-        <Image
-          source={{ uri: 'https://picsum.photos/seed/twin' + node.id + '/320/320' }}
-          style={polaS.photo}
-          resizeMode="cover"
-        />
+        {/* Photo or elegant gradient fallback */}
+        {node.imageUri ? (
+          <Image
+            source={{ uri: node.imageUri }}
+            style={polaS.photo}
+            resizeMode="cover"
+          />
+        ) : (
+          <LinearGradient
+            colors={CARD_PALETTES[paletteIdx]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={polaS.photoGrad}
+          >
+            <Text style={polaS.gradEmoji}>{node.tag.split(' ')[0]}</Text>
+          </LinearGradient>
+        )}
+
         <View style={polaS.caption}>
           <Text style={polaS.tagText}>{node.tag}</Text>
           <Text style={polaS.quote} numberOfLines={2}>"{node.quote}"</Text>
@@ -381,9 +407,16 @@ const polaS = StyleSheet.create({
     shadowOpacity: 0.28,
     shadowRadius: 10,
   },
-  photo: { width: CARD_IMG, height: CARD_IMG, backgroundColor: '#E2E8F0' },
-  caption: { paddingTop: 8, paddingBottom: 14, gap: 3 },
-  tagText: {
+  photo:     { width: CARD_IMG, height: CARD_IMG, backgroundColor: '#E2E8F0' },
+  photoGrad: {
+    width: CARD_IMG,
+    height: CARD_IMG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradEmoji: { fontSize: 36 },
+  caption:   { paddingTop: 8, paddingBottom: 14, gap: 3 },
+  tagText:   {
     fontSize: 9, color: '#7C3AED', fontWeight: '600',
     letterSpacing: 0.6, textTransform: 'uppercase',
   },
@@ -405,15 +438,100 @@ function HeartPulse() {
   return <Animated.View style={style}><Text style={{ fontSize: 18 }}>❤️</Text></Animated.View>;
 }
 
+// ─── AnimatedCounter ──────────────────────────────────────────────────────────
+// Counts up from `from` to `to` over `duration` ms with ease-out cubic timing.
+
+function useCountUp(target: number, duration = 1100): number {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const prevTarget = useRef(0);
+
+  useEffect(() => {
+    if (prevTarget.current === target) return;
+    const startVal = prevTarget.current;
+    const endVal = target;
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(startVal + (endVal - startVal) * eased));
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        prevTarget.current = endVal;
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target, duration]);
+
+  return display;
+}
+
+// ─── StatCard ─────────────────────────────────────────────────────────────────
+
+interface StatCardProps {
+  t: ThemeTokens;
+  icon: React.ReactNode;
+  // When `valuePrefix`/`valueSuffix` wrap the animated number
+  prefix?: string;
+  animatedNum: number;
+  suffix?: string;
+  // Overrides the animated number entirely (e.g. "D+?" when not configured)
+  staticValue?: string;
+  label: string;
+  glowColor: string;
+}
+
+function StatCard({
+  t, icon, prefix = '', animatedNum, suffix = '', staticValue, label, glowColor,
+}: StatCardProps) {
+  const countedNum = useCountUp(animatedNum);
+  const displayVal = staticValue ?? `${prefix}${countedNum.toLocaleString()}${suffix}`;
+
+  return (
+    <View
+      style={[
+        statsS.card,
+        {
+          borderColor: t.isLight ? 'rgba(200,150,180,0.28)' : 'rgba(124,58,237,0.22)',
+          backgroundColor: t.isLight ? 'rgba(255,255,255,0.72)' : 'rgba(30,41,59,0.52)',
+        },
+      ]}
+    >
+      <View style={statsS.iconBox}>{icon}</View>
+      <Text
+        style={[
+          statsS.value,
+          {
+            color: glowColor,
+            textShadowColor: glowColor,
+            textShadowOffset: { width: 0, height: 0 },
+            textShadowRadius: 8,
+          },
+        ]}
+      >
+        {displayVal}
+      </Text>
+      <Text style={[statsS.label, { color: t.textMuted }]}>{label}</Text>
+    </View>
+  );
+}
+
 // ─── StatsBar ─────────────────────────────────────────────────────────────────
 
-const STATS_DATA = [
-  { heart: true,  icon: '',   label: '우리 1주년', value: 'D+365' },
-  { heart: false, icon: '📸', label: '업로드 사진', value: '1,248' },
-  { heart: false, icon: '📍', label: '방문 장소',   value: '42'   },
-];
-
 function StatsBar({ t }: { t: ThemeTokens }) {
+  const { dDay, dDayLabel, photoCount, visitCount } = useCoupleLiveStats();
+
+  // D-Day display: when startedAt configured → "D+516", else "D+?"
+  const dDayDisplay = dDay > 0 ? `D+${dDay.toLocaleString()}` : undefined;
+
   return (
     <View style={statsS.wrapper}>
       <LinearGradient
@@ -424,24 +542,35 @@ function StatsBar({ t }: { t: ThemeTokens }) {
         }
         style={statsS.row}
       >
-        {STATS_DATA.map((s, i) => (
-          <View
-            key={i}
-            style={[
-              statsS.card,
-              {
-                borderColor: t.isLight ? 'rgba(200,150,180,0.28)' : 'rgba(124,58,237,0.22)',
-                backgroundColor: t.isLight ? 'rgba(255,255,255,0.72)' : 'rgba(30,41,59,0.52)',
-              },
-            ]}
-          >
-            <View style={statsS.iconBox}>
-              {s.heart ? <HeartPulse /> : <Text style={{ fontSize: 18 }}>{s.icon}</Text>}
-            </View>
-            <Text style={[statsS.value, { color: t.text }]}>{s.value}</Text>
-            <Text style={[statsS.label, { color: t.textMuted }]}>{s.label}</Text>
-          </View>
-        ))}
+        {/* D-Day card — violet glow */}
+        <StatCard
+          t={t}
+          icon={<HeartPulse />}
+          animatedNum={dDay}
+          staticValue={dDayDisplay ?? 'D+?'}
+          label={dDayLabel}
+          glowColor="#7C3AED"
+        />
+
+        {/* Photo count card — neon green glow */}
+        <StatCard
+          t={t}
+          icon={<Text style={{ fontSize: 18 }}>📸</Text>}
+          animatedNum={photoCount}
+          suffix="장"
+          label="업로드 사진"
+          glowColor="#4ADE80"
+        />
+
+        {/* Visit count card — orchid glow */}
+        <StatCard
+          t={t}
+          icon={<Text style={{ fontSize: 18 }}>📍</Text>}
+          animatedNum={visitCount}
+          suffix="곳"
+          label="방문 장소"
+          glowColor="#D946EF"
+        />
       </LinearGradient>
     </View>
   );
@@ -490,6 +619,205 @@ const headS = StyleSheet.create({
   sub:   { fontSize: FontSize.sm, fontStyle: 'italic', marginTop: 4 },
 });
 
+// ─── PartnerReviewSkeleton ─────────────────────────────────────────────────────
+// Displayed while the async fetch is in progress.
+
+function PartnerReviewSkeleton() {
+  const shimmer = useSharedValue(0);
+
+  useEffect(() => {
+    shimmer.value = withRepeat(
+      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, []);
+
+  const barStyle = useAnimatedStyle(() => ({
+    opacity: 0.3 + shimmer.value * 0.45,
+  }));
+
+  return (
+    <View style={prS.skeletonWrap}>
+      <Text style={prS.loadingLabel}>추억을 불러오는 중이에요... 🗺️</Text>
+      <Animated.View style={[prS.skeletonBar, prS.skeletonBarWide, barStyle]} />
+      <Animated.View style={[prS.skeletonBar, prS.skeletonBarNarrow, barStyle]} />
+    </View>
+  );
+}
+
+// ─── PartnerGlowStars ──────────────────────────────────────────────────────────
+// Star rating with neon violet/pink glow for the partner review card.
+
+function PartnerGlowStars({ value }: { value: number }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 4 }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Text
+          key={star}
+          style={[
+            { fontSize: 22 },
+            star <= value
+              ? {
+                  textShadowColor: '#D946EF',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 10,
+                }
+              : { opacity: 0.2 },
+          ]}
+        >
+          ⭐
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+// ─── PartnerReviewCard ─────────────────────────────────────────────────────────
+
+interface PartnerReviewCardProps {
+  partnerName: string;
+  review: import('../../src/services/partnerReviewService').PartnerPlaceReview | null;
+  isLoading: boolean;
+  requestSent: boolean;
+  onRequest: () => void;
+}
+
+function PartnerReviewCard({
+  partnerName,
+  review,
+  isLoading,
+  requestSent,
+  onRequest,
+}: PartnerReviewCardProps) {
+  return (
+    <View style={prS.section}>
+      <LinearGradient
+        colors={['rgba(124,58,237,0.14)', 'rgba(217,70,239,0.08)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={prS.card}
+      >
+        {/* Section header */}
+        <View style={prS.headerRow}>
+          <Text style={prS.avatarEmoji}>💜</Text>
+          <Text style={prS.partnerNameText}>{partnerName}의 후기</Text>
+        </View>
+
+        {isLoading ? (
+          <PartnerReviewSkeleton />
+        ) : review && review.rating > 0 ? (
+          /* ── Review exists ── */
+          <View style={prS.reviewBody}>
+            <PartnerGlowStars value={review.rating} />
+            {review.review ? (
+              <Text style={prS.reviewText}>"{review.review}"</Text>
+            ) : null}
+            <Text style={prS.syncBadge}>✅ 실시간 연동 완료</Text>
+          </View>
+        ) : (
+          /* ── No review yet ── */
+          <View style={prS.emptyBody}>
+            <Text style={prS.emptyText}>
+              파트너가 아직 별점을 남기지 않았어요 💬
+            </Text>
+            <Pressable
+              onPress={onRequest}
+              disabled={requestSent}
+              style={({ pressed }) => [
+                prS.nudgeBtn,
+                (pressed || requestSent) && prS.nudgeBtnPressed,
+              ]}
+            >
+              <LinearGradient
+                colors={
+                  requestSent
+                    ? ['#334155', '#1E293B']
+                    : ['#7C3AED', '#D946EF']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={prS.nudgeGrad}
+              >
+                <Text style={prS.nudgeTxt}>
+                  {requestSent ? '📨 요청 보냄!' : '흔적 남기기 요청하기 👉'}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        )}
+      </LinearGradient>
+    </View>
+  );
+}
+
+const prS = StyleSheet.create({
+  section: { marginVertical: 8 },
+  card: {
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.28)',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  avatarEmoji: { fontSize: 20 },
+  partnerNameText: {
+    color: '#F1F5F9',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  reviewBody: { gap: 8 },
+  reviewText: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 19,
+  },
+  syncBadge: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  emptyBody: { gap: 10 },
+  emptyText: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  nudgeBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  nudgeBtnPressed: { opacity: 0.65 },
+  nudgeGrad: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  nudgeTxt: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  // skeleton
+  skeletonWrap: { gap: 10 },
+  loadingLabel: {
+    color: '#64748B',
+    fontSize: 12,
+  },
+  skeletonBar: {
+    height: 10,
+    borderRadius: 6,
+    backgroundColor: '#7C3AED',
+  },
+  skeletonBarWide: { width: '70%' },
+  skeletonBarNarrow: { width: '45%' },
+});
+
 // ─── StarRating ───────────────────────────────────────────────────────────────
 
 function StarRating({
@@ -524,16 +852,25 @@ function AddCourseSheet({
   visible,
   onClose,
   partnerName,
+  onPlaceSelected,
 }: {
   visible: boolean;
   onClose: () => void;
   partnerName: string;
+  onPlaceSelected?: (lat: number, lng: number) => void;
 }) {
   const { addDateCourse } = useAppContext();
   const [title, setTitle]     = useState('');
   const [date, setDate]       = useState('');
   const [myRating, setMyRating]   = useState(0);
   const [myReview, setMyReview]   = useState('');
+
+  // ── Geocoding state ──────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery]     = useState('');
+  const [searchResults, setSearchResults] = useState<KakaoPlace[]>([]);
+  const [isSearching, setIsSearching]     = useState(false);
+  const [selectedPlace, setSelectedPlace] = useState<KakaoPlace | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const slideY = useSharedValue(600);
 
@@ -547,38 +884,91 @@ function AddCourseSheet({
     transform: [{ translateY: slideY.value }],
   }));
 
-  const mockPartnerRating = useRef(
-    [3, 3.5, 4, 4.5, 5][Math.floor(Math.random() * 5)]
-  ).current;
-  const mockPartnerReview = useRef(
-    PARTNER_MOCK_REVIEWS[Math.floor(Math.random() * PARTNER_MOCK_REVIEWS.length)]
-  ).current;
+  // Debounced keyword search — 300 ms after typing stops
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const results = await searchPlacesByKeyword(q);
+        setSearchResults(results.slice(0, 5));
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [searchQuery]);
+
+  const handleSelectPlace = (place: KakaoPlace) => {
+    setSelectedPlace(place);
+    setTitle(place.place_name);
+    setSearchQuery(place.place_name);
+    setSearchResults([]);
+  };
+
+  const handleClearPlace = () => {
+    setSelectedPlace(null);
+    setSearchQuery('');
+    setTitle('');
+  };
+
+  // ── Partner review — real-time data pipeline ─────────────────────────────
+  const placeId = selectedPlace?.id ?? null;
+  const {
+    review: partnerPlaceReview,
+    isLoading: partnerLoading,
+    requestSent,
+    requestReview,
+  } = usePartnerPlaceReview(placeId);
 
   const handleSave = () => {
-    if (!title.trim() || !date.trim() || myRating === 0) return;
+    if (!title.trim() || !date.trim() || myRating === 0 || !selectedPlace) return;
+
+    const lat = parseFloat(selectedPlace.y);
+    const lng = parseFloat(selectedPlace.x);
 
     const course: DateCourse = {
       id: Date.now().toString(),
       title: title.trim(),
       date: date.trim(),
-      // Default to Gangnam area; real implementation would use geolocation
-      latitude: 37.498 + (Math.random() - 0.5) * 0.06,
-      longitude: 127.028 + (Math.random() - 0.5) * 0.06,
+      latitude: lat,
+      longitude: lng,
       myRating,
       myReview: myReview.trim(),
-      partnerRating: mockPartnerRating,
-      partnerReview: mockPartnerReview,
+      // Partner data starts empty — populated reactively when partner reviews the place
+      partnerRating: partnerPlaceReview?.rating ?? 0,
+      partnerReview: partnerPlaceReview?.review ?? '',
+      kakaoPlaceId: selectedPlace.id,
     };
 
     addDateCourse(course);
+    onPlaceSelected?.(lat, lng);
+
     setTitle('');
     setDate('');
     setMyRating(0);
     setMyReview('');
+    setSearchQuery('');
+    setSearchResults([]);
+    setSelectedPlace(null);
     onClose();
   };
 
-  const canSave = title.trim().length > 0 && date.trim().length > 0 && myRating > 0;
+  const canSave =
+    title.trim().length > 0 &&
+    date.trim().length > 0 &&
+    myRating > 0 &&
+    selectedPlace !== null;
 
   return (
     <Modal
@@ -603,7 +993,7 @@ function AddCourseSheet({
             {/* Handle */}
             <View style={sheetS.handle} />
 
-            {/* Title */}
+            {/* Title badge */}
             <LinearGradient
               colors={['#7C3AED', '#D946EF', '#FF6B8B']}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -614,7 +1004,81 @@ function AddCourseSheet({
             </LinearGradient>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Place name */}
+
+              {/* ── Geocoding Search ─────────────────────────────────────── */}
+              <Text style={sheetS.fieldLabel}>🔍 장소 검색</Text>
+
+              {/* Search input row */}
+              <View style={[
+                sheetS.searchRow,
+                selectedPlace ? sheetS.searchRowDone : null,
+              ]}>
+                <TextInput
+                  style={sheetS.searchInput}
+                  placeholder="카페, 식당, 공원... 키워드 검색"
+                  placeholderTextColor="#475569"
+                  value={searchQuery}
+                  onChangeText={(text) => {
+                    setSearchQuery(text);
+                    // clear selection if user edits after selecting
+                    if (selectedPlace && text !== selectedPlace.place_name) {
+                      setSelectedPlace(null);
+                      setTitle('');
+                    }
+                  }}
+                  returnKeyType="search"
+                />
+                {isSearching ? (
+                  <ActivityIndicator size="small" color="#D946EF" style={sheetS.searchSpinner} />
+                ) : null}
+              </View>
+
+              {/* Search results dropdown */}
+              {searchResults.length > 0 && !selectedPlace && (
+                <View style={sheetS.resultsList}>
+                  {searchResults.map((place, idx) => (
+                    <Pressable
+                      key={place.id}
+                      style={({ pressed }) => [
+                        sheetS.resultItem,
+                        idx === searchResults.length - 1 && { borderBottomWidth: 0 },
+                        pressed && sheetS.resultItemPressed,
+                      ]}
+                      onPress={() => handleSelectPlace(place)}
+                    >
+                      <Text style={sheetS.resultName} numberOfLines={1}>
+                        {place.place_name}
+                      </Text>
+                      <Text style={sheetS.resultAddr} numberOfLines={1}>
+                        {place.road_address_name || place.address_name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              {/* Selected place badge */}
+              {selectedPlace && (
+                <View style={sheetS.selectedBadge}>
+                  <LinearGradient
+                    colors={['rgba(74,222,128,0.12)', 'rgba(74,222,128,0.06)']}
+                    style={sheetS.selectedBadgeInner}
+                  >
+                    <Text style={sheetS.selectedIcon}>✅</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={sheetS.selectedName}>{selectedPlace.place_name}</Text>
+                      <Text style={sheetS.selectedAddr} numberOfLines={1}>
+                        {selectedPlace.road_address_name || selectedPlace.address_name}
+                      </Text>
+                    </View>
+                    <Pressable onPress={handleClearPlace} hitSlop={10}>
+                      <Text style={sheetS.selectedClear}>✕</Text>
+                    </Pressable>
+                  </LinearGradient>
+                </View>
+              )}
+
+              {/* Place label (auto-filled, editable) */}
               <Text style={sheetS.fieldLabel}>장소 / 코스 명칭</Text>
               <TextInput
                 style={sheetS.input}
@@ -650,20 +1114,18 @@ function AddCourseSheet({
                 multiline
               />
 
-              {/* Partner section */}
-              <View style={sheetS.partnerSection}>
-                <LinearGradient
-                  colors={['rgba(124,58,237,0.12)', 'rgba(217,70,239,0.08)']}
-                  style={sheetS.partnerCard}
-                >
-                  <Text style={sheetS.partnerName}>{partnerName}이의 후기</Text>
-                  <Text style={sheetS.partnerStatus}>
-                    🔄 실제 연인 연동 전 · 가상 데이터 미리보기
-                  </Text>
-                  <StarRating value={Math.round(mockPartnerRating)} readonly size={22} />
-                  <Text style={sheetS.partnerReview}>"{mockPartnerReview}"</Text>
-                </LinearGradient>
-              </View>
+              {/* Partner review — real-time data card */}
+              {selectedPlace && (
+                <PartnerReviewCard
+                  partnerName={partnerName}
+                  review={partnerPlaceReview}
+                  isLoading={partnerLoading}
+                  requestSent={requestSent}
+                  onRequest={() =>
+                    requestReview(selectedPlace.place_name, partnerName)
+                  }
+                />
+              )}
 
               {/* Save CTA */}
               <Pressable
@@ -728,23 +1190,90 @@ const sheetS = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   reviewInput: { minHeight: 72, textAlignVertical: 'top' },
-  partnerSection: { marginVertical: Spacing.sm },
-  partnerCard: {
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.22)',
-  },
-  partnerName: { color: '#F1F5F9', fontSize: FontSize.base, fontWeight: FontWeight.bold },
-  partnerStatus: { color: '#64748B', fontSize: FontSize.xs },
-  partnerReview: {
-    color: '#94A3B8', fontSize: FontSize.sm, fontStyle: 'italic',
-    lineHeight: 18,
-  },
   cta: { borderRadius: Radius.xl, overflow: 'hidden', marginTop: Spacing.sm },
   ctaGrad: { paddingVertical: Spacing.md, alignItems: 'center' },
   ctaTxt: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
+
+  // ── Geocoding search UI ────────────────────────────────────────────────────
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30,41,59,0.8)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.3)',
+    marginBottom: 6,
+    overflow: 'hidden',
+  },
+  searchRowDone: {
+    borderColor: '#4ADE80',
+  },
+  searchInput: {
+    flex: 1,
+    color: '#F1F5F9',
+    fontSize: FontSize.base,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+  },
+  searchSpinner: {
+    marginRight: Spacing.md,
+  },
+  resultsList: {
+    backgroundColor: 'rgba(10,13,26,0.97)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.28)',
+    marginBottom: Spacing.md,
+    overflow: 'hidden',
+  },
+  resultItem: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(124,58,237,0.14)',
+  },
+  resultItemPressed: {
+    backgroundColor: 'rgba(124,58,237,0.18)',
+  },
+  resultName: {
+    color: '#F1F5F9',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  resultAddr: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  selectedBadge: {
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.38)',
+  },
+  selectedBadgeInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+  },
+  selectedIcon: { fontSize: 16 },
+  selectedName: {
+    color: '#4ADE80',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  selectedAddr: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  selectedClear: {
+    color: '#475569',
+    fontSize: 15,
+    paddingLeft: 8,
+  },
 });
 
 // ─── CourseListCard ───────────────────────────────────────────────────────────
@@ -810,36 +1339,140 @@ const cListS = StyleSheet.create({
 
 // ─── DateShuttleModal ─────────────────────────────────────────────────────────
 
+type ShuttlePhase = 'idle' | 'gathering' | 'generating' | 'done';
+
+// ── Orbital loading animation (neon pink/violet rings) ────────────────────────
+function ShuttleLoadingView({ label }: { label: string }) {
+  const r1    = useSharedValue(0);
+  const r2    = useSharedValue(0);
+  const r3    = useSharedValue(0);
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    r1.value    = withRepeat(withTiming(360,  { duration: 3000, easing: Easing.linear }), -1, false);
+    r2.value    = withRepeat(withTiming(-360, { duration: 2200, easing: Easing.linear }), -1, false);
+    r3.value    = withRepeat(withTiming(360,  { duration: 1600, easing: Easing.linear }), -1, false);
+    pulse.value = withRepeat(
+      withSequence(withTiming(1.14, { duration: 660 }), withTiming(0.92, { duration: 660 })),
+      -1,
+      true,
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const ring1S = useAnimatedStyle(() => ({ transform: [{ rotate: `${r1.value}deg` }] }));
+  const ring2S = useAnimatedStyle(() => ({ transform: [{ rotate: `${r2.value}deg` }] }));
+  const ring3S = useAnimatedStyle(() => ({ transform: [{ rotate: `${r3.value}deg` }] }));
+  const coreS  = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
+
+  return (
+    <View style={shuS.loadWrap}>
+      <View style={shuS.orbitArea}>
+        <Animated.View style={[shuS.ring3, ring3S]} />
+        <Animated.View style={[shuS.ring2, ring2S]} />
+        <Animated.View style={[shuS.ring1, ring1S]} />
+        <Animated.View style={[shuS.coreCircle, coreS]}>
+          <Text style={shuS.coreEmoji}>🚀</Text>
+        </Animated.View>
+      </View>
+      <Text style={shuS.loadLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Structured 3-card result view ─────────────────────────────────────────────
+function ShuttleResultView({
+  result,
+  onReset,
+}: {
+  result: ShuttleResult;
+  onReset: () => void;
+}) {
+  return (
+    <ScrollView style={shuS.resultScroll} showsVerticalScrollIndicator={false}>
+      <View style={shuS.introWrap}>
+        <Text style={shuS.introEmoji}>✨</Text>
+        <Text style={shuS.introText}>{result.intro}</Text>
+      </View>
+
+      {result.cards.map((card) => (
+        <View key={card.step} style={shuS.card}>
+          <LinearGradient
+            colors={['rgba(124,58,237,0.15)', 'rgba(255,107,139,0.08)']}
+            style={shuS.cardInner}
+          >
+            <View style={shuS.cardHeader}>
+              <LinearGradient
+                colors={['#7C3AED', '#D946EF']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={shuS.stepBadge}
+              >
+                <Text style={shuS.stepNum}>{card.step}</Text>
+              </LinearGradient>
+              <View style={{ flex: 1 }}>
+                <Text style={shuS.cardPlace}>📍 {card.place}</Text>
+                <Text style={shuS.cardCategory}>{card.category}</Text>
+              </View>
+            </View>
+            <Text style={shuS.cardTimeSlot}>⏰ {card.timeSlot}</Text>
+            <Text style={shuS.cardTip}>📝 {card.tip}</Text>
+          </LinearGradient>
+        </View>
+      ))}
+
+      <Pressable style={shuS.resetBtn} onPress={onReset}>
+        <Text style={shuS.resetTxt}>다시 물어보기</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+// ── Main modal component ──────────────────────────────────────────────────────
 function DateShuttleModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const [food, setFood] = useState<string | null>(null);
-  const [mood, setMood] = useState<string | null>(null);
-  const [ootd, setOotd] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { partnerProfile, dateCourses } = useAppContext();
+  const [food, setFood]   = useState<string | null>(null);
+  const [mood, setMood]   = useState<string | null>(null);
+  const [ootd, setOotd]   = useState<string | null>(null);
+  const [phase, setPhase] = useState<ShuttlePhase>('idle');
+  const [phaseLabel, setPhaseLabel] = useState('');
+  const [result, setResult] = useState<ShuttleResult | null>(null);
 
-  const ready = food && mood && ootd;
+  const ready     = food !== null && mood !== null && ootd !== null;
+  const isLoading = phase === 'gathering' || phase === 'generating';
 
-  const handleFind = () => {
+  const handleFind = async () => {
     if (!ready) return;
-    setLoading(true);
-    setTimeout(() => {
-      const ootdNote =
-        ootd === '캐주얼' ? '편안한 차림이시니'
-        : ootd === '정장' ? '격식 있는 차림이시니'
-        : '커플룩이시니';
-      setResult(
-        ootdNote +
-          ' 분위기에 맞는 코스를 큐레이션했어요! ✨\n\n📍 10분 거리 ' +
-          (food ? food.slice(2) : '') +
-          ' 맛집 → ☕ 근처 루프탑 카페 → 🍮 미쉐린 추천 디저트 순으로 다녀오시면 완벽할 것 같아요.',
-      );
-      setLoading(false);
-    }, 1500);
+    try {
+      // Phase 1: collect GPS · weather · partner prefs in parallel
+      setPhase('gathering');
+      setPhaseLabel('GPS · 날씨 · 취향 데이터 수집 중...');
+      const ctx = await gatherDateShuttleContext(partnerProfile, dateCourses);
+
+      // Phase 2: LLM recommendation with rich context
+      setPhase('generating');
+      setPhaseLabel('AI 셔틀 엔진 최적 코스 생성 중...');
+      const shuttleResult = await requestDateShuttleRecommendation(ctx, food!, mood!, ootd!);
+
+      setResult(shuttleResult);
+      setPhase('done');
+    } catch {
+      // Hard catch-all — requestDateShuttleRecommendation already returns fallback
+      // so this branch is only hit on extreme runtime errors
+      setResult({
+        intro: '셔틀 엔진에 일시적인 안개가 꼈어요 🌫️ 주변 추천 코스를 대신 불러올게요!',
+        cards: [
+          { step: 1, place: '성수동 감성 이탈리안', category: '🍝 레스토랑', timeSlot: '오후 6시~7시30분',    tip: '조용하고 분위기 있어서 편하게 대화하기 딱 좋아요 🤍' },
+          { step: 2, place: '서울숲 야간 산책로',   category: '🌳 산책',     timeSlot: '오후 7시30분~8시30분', tip: '손 꼭 잡고 걷다 보면 기억에 남는 밤이 될 거예요 🌙' },
+          { step: 3, place: '어니언 성수 루프탑',   category: '☕ 카페',     timeSlot: '오후 8시30분~10시',   tip: '야경 보면서 오늘 하루 이야기 나눠봐요 ✨' },
+        ],
+      });
+      setPhase('done');
+    }
   };
 
   const handleClose = () => {
     setFood(null); setMood(null); setOotd(null);
-    setResult(null); setLoading(false);
+    setResult(null); setPhase('idle');
     onClose();
   };
 
@@ -860,19 +1493,13 @@ function DateShuttleModal({ visible, onClose }: { visible: boolean; onClose: () 
             </LinearGradient>
           </View>
 
-          {result ? (
-            <View style={shuS.resultCard}>
-              <LinearGradient
-                colors={['rgba(124,58,237,0.18)', 'rgba(255,107,139,0.1)']}
-                style={shuS.resultInner}
-              >
-                <Text style={shuS.resultEmoji}>✨</Text>
-                <Text style={shuS.resultText}>{result}</Text>
-                <Pressable style={shuS.resetBtn} onPress={() => setResult(null)}>
-                  <Text style={shuS.resetTxt}>다시 물어보기</Text>
-                </Pressable>
-              </LinearGradient>
-            </View>
+          {isLoading ? (
+            <ShuttleLoadingView label={phaseLabel} />
+          ) : phase === 'done' && result ? (
+            <ShuttleResultView
+              result={result}
+              onReset={() => { setResult(null); setPhase('idle'); }}
+            />
           ) : (
             <>
               <Text style={shuS.sectionLabel}>🍽️ 오늘 뭐 땡겨?</Text>
@@ -894,26 +1521,28 @@ function DateShuttleModal({ visible, onClose }: { visible: boolean; onClose: () 
               <Text style={shuS.sectionLabel}>👗 오늘 서로의 OOTD는?</Text>
               <View style={shuS.ootdRow}>
                 {OOTD_OPTIONS.map((o) => (
-                  <Pressable key={o.label} style={[shuS.ootdBtn, ootd === o.label && shuS.ootdOn]} onPress={() => setOotd(o.label)}>
+                  <Pressable
+                    key={o.label}
+                    style={[shuS.ootdBtn, ootd === o.label && shuS.ootdOn]}
+                    onPress={() => setOotd(o.label)}
+                  >
                     <Text style={shuS.ootdEmoji}>{o.icon}</Text>
                     <Text style={[shuS.ootdLabel, ootd === o.label && shuS.ootdLabelOn]}>{o.label}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Pressable onPress={handleFind} style={[shuS.ctaWrap, !ready && { opacity: 0.38 }]} disabled={!ready}>
-                {loading ? (
-                  <View style={shuS.ctaLoading}>
-                    <Text style={shuS.ctaTxt}>코스 짜는 중... ✨</Text>
-                  </View>
-                ) : (
-                  <LinearGradient
-                    colors={['#7C3AED', '#D946EF', '#FF6B8B']}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={shuS.ctaGradient}
-                  >
-                    <Text style={shuS.ctaTxt}>데이트 코스 찾아줘 🚀</Text>
-                  </LinearGradient>
-                )}
+              <Pressable
+                onPress={handleFind}
+                style={[shuS.ctaWrap, !ready && { opacity: 0.38 }]}
+                disabled={!ready}
+              >
+                <LinearGradient
+                  colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={shuS.ctaGradient}
+                >
+                  <Text style={shuS.ctaTxt}>데이트 코스 찾아줘 🚀</Text>
+                </LinearGradient>
               </Pressable>
             </>
           )}
@@ -924,6 +1553,7 @@ function DateShuttleModal({ visible, onClose }: { visible: boolean; onClose: () 
 }
 
 const shuS = StyleSheet.create({
+  // ── Modal structure ──────────────────────────────────────────────────────────
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.52)' },
   sheet: {
     borderTopLeftRadius: Radius['2xl'], borderTopRightRadius: Radius['2xl'],
@@ -936,6 +1566,7 @@ const shuS = StyleSheet.create({
   sticker: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: Radius.xl, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
   stickerEmoji: { fontSize: 20 },
   stickerText: { color: '#fff', fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  // ── Selection chips ──────────────────────────────────────────────────────────
   sectionLabel: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chip: { backgroundColor: 'rgba(30,41,59,0.8)', borderRadius: Radius.pill, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: 'rgba(124,58,237,0.2)' },
@@ -950,13 +1581,56 @@ const shuS = StyleSheet.create({
   ootdLabelOn: { color: '#F1F5F9', fontWeight: FontWeight.semibold },
   ctaWrap: { borderRadius: Radius.xl, overflow: 'hidden', marginTop: 4 },
   ctaGradient: { paddingVertical: Spacing.md, alignItems: 'center' },
-  ctaLoading: { paddingVertical: Spacing.md, alignItems: 'center', backgroundColor: '#1E293B', borderRadius: Radius.xl },
   ctaTxt: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
-  resultCard: { borderRadius: Radius.xl, overflow: 'hidden' },
-  resultInner: { padding: Spacing.base, alignItems: 'center', gap: Spacing.md, borderRadius: Radius.xl, borderWidth: 1, borderColor: 'rgba(124,58,237,0.28)' },
-  resultEmoji: { fontSize: 32 },
-  resultText: { color: '#F1F5F9', fontSize: FontSize.sm, lineHeight: 20, textAlign: 'center' },
-  resetBtn: { backgroundColor: 'rgba(30,41,59,0.8)', borderRadius: Radius.pill, paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm },
+  // ── Shuttle loading animation ────────────────────────────────────────────────
+  loadWrap: { alignItems: 'center', paddingVertical: 24, gap: Spacing.lg },
+  orbitArea: { width: 124, height: 124, alignItems: 'center', justifyContent: 'center' },
+  // Outer ring — FF6B8B peach pink
+  ring3: {
+    position: 'absolute',
+    width: 118, height: 118, borderRadius: 59,
+    borderWidth: 1.5, borderColor: 'transparent',
+    borderBottomColor: '#FF6B8B',
+    borderRightColor: 'rgba(255,107,139,0.28)',
+  },
+  // Middle ring — 7C3AED neon violet
+  ring1: {
+    position: 'absolute',
+    width: 96, height: 96, borderRadius: 48,
+    borderWidth: 2.5, borderColor: 'transparent',
+    borderTopColor: '#7C3AED',
+    borderRightColor: 'rgba(124,58,237,0.22)',
+  },
+  // Inner ring — D946EF orchid magenta
+  ring2: {
+    position: 'absolute',
+    width: 70, height: 70, borderRadius: 35,
+    borderWidth: 2, borderColor: 'transparent',
+    borderTopColor: '#D946EF',
+    borderLeftColor: 'rgba(217,70,239,0.22)',
+  },
+  coreCircle: { alignItems: 'center', justifyContent: 'center' },
+  coreEmoji: { fontSize: 28 },
+  loadLabel: { color: 'rgba(148,163,184,0.85)', fontSize: FontSize.sm, textAlign: 'center' },
+  // ── Result cards ─────────────────────────────────────────────────────────────
+  resultScroll: { maxHeight: 360 },
+  introWrap: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.sm },
+  introEmoji: { fontSize: 20, marginTop: 1 },
+  introText: { flex: 1, color: '#F1F5F9', fontSize: FontSize.sm, lineHeight: 20 },
+  card: { borderRadius: Radius.xl, overflow: 'hidden', marginBottom: Spacing.sm },
+  cardInner: {
+    padding: Spacing.md, borderRadius: Radius.xl,
+    borderWidth: 1, borderColor: 'rgba(124,58,237,0.22)',
+    gap: Spacing.xs,
+  },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.xs },
+  stepBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  stepNum: { color: '#fff', fontSize: 11, fontWeight: FontWeight.bold },
+  cardPlace: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  cardCategory: { color: '#94A3B8', fontSize: FontSize.xs, marginTop: 1 },
+  cardTimeSlot: { color: 'rgba(217,70,239,0.9)', fontSize: FontSize.xs, fontWeight: FontWeight.medium },
+  cardTip: { color: '#CBD5E1', fontSize: FontSize.xs, lineHeight: 17, marginTop: 2 },
+  resetBtn: { backgroundColor: 'rgba(30,41,59,0.8)', borderRadius: Radius.pill, paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, alignSelf: 'center', marginTop: Spacing.sm },
   resetTxt: { color: '#94A3B8', fontSize: FontSize.xs },
 });
 
@@ -1185,16 +1859,155 @@ const recS = StyleSheet.create({
   timeTxt: { color: '#FF6B8B', fontSize: 10, fontWeight: FontWeight.semibold },
 });
 
+// ─── WeatherWidget ────────────────────────────────────────────────────────────
+// Displays real-time weather fetched for the map center. Shown inside AIMuseSheet
+// so the user knows whether today's outing leans indoor or outdoor before picking
+// a course. Uses neon glow coloring aligned with the Twin.me dark design tokens.
+
+function WeatherWidget({
+  weather,
+  isLoading,
+}: {
+  weather: WeatherData | null;
+  isLoading: boolean;
+}) {
+  const shimmer = useSharedValue(0);
+
+  useEffect(() => {
+    if (isLoading) {
+      shimmer.value = withRepeat(
+        withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
+    } else {
+      shimmer.value = withTiming(1, { duration: 200 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    opacity: isLoading ? 0.35 + shimmer.value * 0.5 : 1,
+  }));
+
+  const glowColor = weather?.glowColor ?? '#7C3AED';
+
+  return (
+    <Animated.View
+      style={[
+        wxS.container,
+        { borderColor: glowColor + '44' },
+        shimmerStyle,
+      ]}
+    >
+      {/* Icon */}
+      <Text
+        style={[
+          wxS.icon,
+          {
+            textShadowColor: glowColor,
+            textShadowOffset: { width: 0, height: 0 },
+            textShadowRadius: 14,
+          },
+        ]}
+      >
+        {isLoading ? '🌡️' : (weather?.icon ?? '🌡️')}
+      </Text>
+
+      {/* Temp + status */}
+      <View style={wxS.info}>
+        <Text
+          style={[
+            wxS.temp,
+            {
+              color: glowColor,
+              textShadowColor: glowColor,
+              textShadowOffset: { width: 0, height: 0 },
+              textShadowRadius: 8,
+            },
+          ]}
+        >
+          {isLoading ? '—°C' : `${weather?.temperature ?? '—'}°C`}
+        </Text>
+        <Text style={wxS.status}>
+          {isLoading ? '날씨 불러오는 중...' : (weather?.weatherStatus ?? '—')}
+        </Text>
+      </View>
+
+      {/* Outdoor risk badge */}
+      {!isLoading && weather && (
+        <View
+          style={[
+            wxS.riskBadge,
+            weather.isOutdoorRisky
+              ? { backgroundColor: 'rgba(248,113,113,0.12)', borderColor: 'rgba(248,113,113,0.35)' }
+              : { backgroundColor: 'rgba(74,222,128,0.10)', borderColor: 'rgba(74,222,128,0.32)' },
+          ]}
+        >
+          <Text
+            style={[
+              wxS.riskTxt,
+              { color: weather.isOutdoorRisky ? '#F87171' : '#4ADE80' },
+            ]}
+          >
+            {weather.isOutdoorRisky ? '🏠 실내 코스 우선' : '🌿 야외 활동 최적'}
+          </Text>
+        </View>
+      )}
+    </Animated.View>
+  );
+}
+
+const wxS = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(10,13,26,0.65)',
+    borderRadius: Radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderWidth: 1,
+  },
+  icon: {
+    fontSize: 30,
+  },
+  info: { flex: 1, gap: 2 },
+  temp: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    letterSpacing: -0.3,
+  },
+  status: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+  },
+  riskBadge: {
+    borderRadius: Radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  riskTxt: {
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+  },
+});
+
 // ─── AIMuseSheet ──────────────────────────────────────────────────────────────
 
 function AIMuseSheet({
   visible,
   onClose,
   onSubmit,
+  weather,
+  weatherLoading,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: (ootd: string, mood: string) => void;
+  weather: WeatherData | null;
+  weatherLoading: boolean;
 }) {
   const [ootd, setOotd] = useState<string | null>(null);
   const [mood, setMood] = useState<string | null>(null);
@@ -1250,6 +2063,9 @@ function AIMuseSheet({
               오늘의 감성을 알려주시면{'\n'}우리 커플 데이터 기반으로 코스를 큐레이션해 드릴게요
             </Text>
           </View>
+
+          {/* Real-time weather indicator */}
+          <WeatherWidget weather={weather} isLoading={weatherLoading} />
 
           {/* OOTD chips */}
           <Text style={museS.sectionLabel}>👗 오늘 OOTD 스타일</Text>
@@ -1346,7 +2162,17 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   const { dateCourses, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse } = useAppContext();
   const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
   const { pickPhoto } = usePhotoMetadata();
+
+  // Reactive coordinate chain — recomputed whenever courses are added/removed/reordered.
+  // Sorted by date ASC so the Polyline traces the chronological date journey.
+  const courseRoute = useMemo(
+    () => generateRoutePolylineSegments(dateCourses),
+    [dateCourses],
+  );
+
   const [addVisible, setAddVisible]           = useState(false);
+  const [currentWeather, setCurrentWeather]   = useState<WeatherData | null>(null);
+  const [weatherLoading, setWeatherLoading]   = useState(false);
 
   // Open AddCourseSheet when triggered from home tab [+추가] button
   useEffect(() => {
@@ -1365,17 +2191,40 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     ? { lat: dateCourses[0].latitude, lng: dateCourses[0].longitude }
     : { lat: 37.5512, lng: 126.9882 };
 
-  // ── AI Muse orchestration (privacyLevel guard) ────────────────────────────
-  // Lv3 (완전복제): full date-history context passed to AI
-  // Lv2 (최적화):   context allowed — style learning is blocked in chat.tsx
-  // Lv1 (보호):     context aggregation terminated → empty dataset
+  // ── Weather fetch triggered on FAB press (Step #31) ─────────────────────
+  // Fires concurrently with opening the sheet so the WeatherWidget renders
+  // the data as soon as the OWM response arrives — typically within 1–2s.
+  const handleMuseFABPress = async () => {
+    setMuseVisible(true);
+    setWeatherLoading(true);
+    try {
+      const w = await fetchCurrentWeather(mapCenter.lat, mapCenter.lng);
+      setCurrentWeather(w);
+    } catch {
+      setCurrentWeather(null);
+    } finally {
+      setWeatherLoading(false);
+    }
+  };
+
+  // ── AI Muse orchestration (Step #29 + #31: real LLM pipeline + weather) ──
+  // Closes the sheet immediately → shows star particle overlay while Kakao + LLM run
+  // Lv1 (보호): empty date history passed to LLM (no personal context)
   const handleMuseSubmit = async (ootd: string, mood: string) => {
+    setMuseVisible(false);
     setIsLoadingAI(true);
     setRecommendations(null);
     setSelectedCourse(null);
     try {
-      const contextCourses = privacyLevel === 1 ? [] : dateCourses;
-      const result = await fetchAIDateCourse(contextCourses, ootd, mood);
+      const result = await requestMuseCourse(
+        mapCenter.lat,
+        mapCenter.lng,
+        ootd,
+        mood,
+        dateCourses,
+        privacyLevel,
+        currentWeather,
+      );
       setRecommendations(result);
     } finally {
       setIsLoadingAI(false);
@@ -1427,6 +2276,7 @@ function DateMapView({ t }: { t: ThemeTokens }) {
           onMarkerPress={(c) => { setSelectedCourse(c); setRecommendations(null); }}
           recommendedPlaces={recommendations ?? undefined}
           panTarget={mapPanTarget}
+          courseRoute={courseRoute}
         />
 
         {/* Star particle loading overlay */}
@@ -1486,8 +2336,18 @@ function DateMapView({ t }: { t: ThemeTokens }) {
       {/* ── Recommendation confirm panel OR course list ── */}
       {recommendations && !isLoadingAI ? (
         <View style={mapV.recPanel}>
+          {/* AI 뮤즈 특별 추천 배지 — neon violet glow */}
+          <View style={mapV.museBadgeWrap}>
+            <LinearGradient
+              colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={mapV.museBadge}
+            >
+              <Text style={mapV.museBadgeTxt}>✨ AI 뮤즈 특별 추천</Text>
+            </LinearGradient>
+          </View>
           <Text style={[mapV.recPanelTitle, { color: t.textMuted }]}>
-            ✨ AI 뮤즈가 큐레이션한 오늘의 데이트 코스
+            현재 위치 기반으로 큐레이션한 실시간 데이트 코스예요
           </Text>
           <Pressable style={mapV.confirmBtn} onPress={handleConfirmCourse}>
             <LinearGradient
@@ -1538,7 +2398,7 @@ function DateMapView({ t }: { t: ThemeTokens }) {
       )}
 
       {/* ── AI Muse FAB (aurora, above photo FAB) ── */}
-      <AuroraMuseFAB onPress={() => setMuseVisible(true)} bottom={MUSE_FAB_BOTTOM} />
+      <AuroraMuseFAB onPress={handleMuseFABPress} bottom={MUSE_FAB_BOTTOM} />
 
       {/* ── 📸 추억 사진 올리기 FAB ── */}
       <Pressable
@@ -1572,11 +2432,14 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         visible={museVisible}
         onClose={() => setMuseVisible(false)}
         onSubmit={handleMuseSubmit}
+        weather={currentWeather}
+        weatherLoading={weatherLoading}
       />
       <AddCourseSheet
         visible={addVisible}
         onClose={() => setAddVisible(false)}
         partnerName={partnerProfile.name}
+        onPlaceSelected={panMapTo}
       />
     </View>
   );
@@ -1605,6 +2468,24 @@ const mapV = StyleSheet.create({
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
     gap: Spacing.sm,
+  },
+  // AI 뮤즈 특별 추천 배지 (neon violet glow)
+  museBadgeWrap: { alignItems: 'center', marginBottom: 2 },
+  museBadge: {
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: 9,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.85,
+    shadowRadius: 18,
+    elevation: 16,
+  },
+  museBadgeTxt: {
+    color: '#fff',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.6,
   },
   recPanelTitle: {
     fontSize: FontSize.xs,
@@ -1662,8 +2543,14 @@ const mapV = StyleSheet.create({
 // ─── ArchiveView (Polaroid Wall) ──────────────────────────────────────────────
 
 function ArchiveView({ t }: { t: ThemeTokens }) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const memories = useMemoryWall(7);
+  const [detailNode, setDetailNode] = useState<MemoryNode | null>(null);
   const [shuttleVisible, setShuttleVisible] = useState(false);
+
+  // Scatter positions recomputed whenever memory count changes — stable per count
+  const scatter = useMemo(() => buildScatter(memories.length), [memories.length]);
+
+  const wallH = Math.max(WALL_H, memories.length * 200 + 100);
 
   return (
     <>
@@ -1672,17 +2559,35 @@ function ArchiveView({ t }: { t: ThemeTokens }) {
         contentContainerStyle={{ paddingBottom: STATS_BAR_H + TabBar.height + 32 }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ height: WALL_H }}>
-          {MEMORIES.map((node, i) => (
-            <PolaroidCard
-              key={node.id}
-              node={node}
-              index={i}
-              isActive={activeId === node.id}
-              onActivate={setActiveId}
-            />
-          ))}
-        </View>
+        {memories.length === 0 ? (
+          // ── Empty state ────────────────────────────────────────────────────
+          <View style={archS.emptyWrap}>
+            <LinearGradient
+              colors={['rgba(124,58,237,0.12)', 'rgba(217,70,239,0.08)']}
+              style={archS.emptyCard}
+            >
+              <Text style={archS.emptyEmoji}>📭</Text>
+              <Text style={[archS.emptyTitle, { color: t.text }]}>
+                아직 추억이 없어요
+              </Text>
+              <Text style={[archS.emptyDesc, { color: t.textMuted }]}>
+                카카오톡 대화 파일을 업로드하면{'\n'}가장 다정했던 순간들을 자동으로 골라드려요 ✨
+              </Text>
+            </LinearGradient>
+          </View>
+        ) : (
+          <View style={{ height: wallH }}>
+            {memories.map((node, i) => (
+              <PolaroidCard
+                key={node.id}
+                node={node}
+                index={i}
+                scatter={scatter[i]}
+                onShowDetail={setDetailNode}
+              />
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <StatsBar t={t} />
@@ -1701,6 +2606,10 @@ function ArchiveView({ t }: { t: ThemeTokens }) {
       </Pressable>
 
       <DateShuttleModal visible={shuttleVisible} onClose={() => setShuttleVisible(false)} />
+
+      {detailNode && (
+        <MemoryDetailModal node={detailNode} onClose={() => setDetailNode(null)} />
+      )}
     </>
   );
 }
@@ -1717,8 +2626,31 @@ const archS = StyleSheet.create({
     shadowRadius: 14,
     elevation: 14,
   },
-  fabGrad: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
-  fabEmoji: { fontSize: 24 },
+  fabGrad:   { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  fabEmoji:  { fontSize: 24 },
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingTop: 60,
+  },
+  emptyCard: {
+    width: '100%',
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.25)',
+  },
+  emptyEmoji: { fontSize: 48 },
+  emptyTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center' },
+  emptyDesc: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────

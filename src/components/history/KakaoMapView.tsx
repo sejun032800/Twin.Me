@@ -23,7 +23,57 @@ interface Props {
   recommendedPlaces?: RecommendedPlace[];
   onMarkerPress?: (course: DateCourse) => void;
   panTarget?: { lat: number; lng: number } | null;
+  courseRoute?: Array<{ latitude: number; longitude: number }>;
 }
+
+// ── Polyline route sync functions (Leaflet / Kakao variants) ─────────────────
+// Draws a dashed orchid-pink route through the ordered coordinate chain.
+// Guards: clears the old polyline first; skips when length <= 1.
+// fitBounds is suppressed when a recommendation overlay is active (recLayers > 0)
+// so the AI-Muse camera move wins.
+
+const syncCourseRouteFn = isMockMode
+  ? `
+    function syncCourseRoute(coords) {
+      if (coursesPolyline) { map.removeLayer(coursesPolyline); coursesPolyline = null; }
+      if (!coords || coords.length <= 1) return;
+      var latlngs = coords.map(function(c) { return [c.latitude, c.longitude]; });
+      coursesPolyline = L.polyline(latlngs, {
+        color: '#D946EF',
+        weight: 4,
+        opacity: 0.82,
+        dashArray: '10, 5',
+      }).addTo(map);
+      if (recLayers.length === 0) {
+        try {
+          var b = L.latLngBounds(latlngs);
+          map.fitBounds(b, { padding: [52, 52], maxZoom: 14 });
+        } catch(_) {}
+      }
+    }
+  `
+  : `
+    function syncCourseRoute(coords) {
+      if (coursesPolyline) { coursesPolyline.setMap(null); coursesPolyline = null; }
+      if (!coords || coords.length <= 1) return;
+      var path = coords.map(function(c) { return new kakao.maps.LatLng(c.latitude, c.longitude); });
+      coursesPolyline = new kakao.maps.Polyline({
+        path: path,
+        strokeWeight: 4,
+        strokeColor: '#D946EF',
+        strokeOpacity: 0.82,
+        strokeStyle: 'shortdash',
+      });
+      coursesPolyline.setMap(map);
+      if (recLayers.length === 0) {
+        try {
+          var bounds = new kakao.maps.LatLngBounds();
+          path.forEach(function(p) { bounds.extend(p); });
+          map.setBounds(bounds);
+        } catch(_) {}
+      }
+    }
+  `;
 
 // ── Inline HTML ───────────────────────────────────────────────────────────────
 
@@ -338,6 +388,7 @@ function buildHTML(): string {
     var courseMarkers = [];
     var photoMarkers = [];
     var recLayers = [];
+    var coursesPolyline = null;
     var openInfo = null;
 
     function rn(obj) {
@@ -356,6 +407,7 @@ function buildHTML(): string {
     ${courseMarkerFn}
     ${photoMarkerFn}
     ${syncRecommendedFn}
+    ${syncCourseRouteFn}
 
     function syncCourses(courses) {
       ${isMockMode ? `
@@ -397,6 +449,7 @@ function buildHTML(): string {
         if (msg.type === 'syncCourses')     syncCourses(msg.data);
         if (msg.type === 'syncPhotos')      syncPhotos(msg.data);
         if (msg.type === 'syncRecommended') syncRecommended(msg.data);
+        if (msg.type === 'syncCourseRoute') syncCourseRoute(msg.data);
         if (msg.type === 'panTo')           panTo(msg.lat, msg.lng);
       };
       if (mapReady) { try { fn(); } catch(e) {} }
@@ -423,6 +476,7 @@ export default function KakaoMapView({
   recommendedPlaces,
   onMarkerPress,
   panTarget,
+  courseRoute,
 }: Props) {
   const webViewRef = useRef<WebView>(null);
 
@@ -435,6 +489,7 @@ export default function KakaoMapView({
   useEffect(() => { post({ type: 'syncCourses', data: courses }); }, [courses]);
   useEffect(() => { post({ type: 'syncPhotos', data: photos }); }, [photos]);
   useEffect(() => { post({ type: 'syncRecommended', data: recommendedPlaces ?? [] }); }, [recommendedPlaces]);
+  useEffect(() => { post({ type: 'syncCourseRoute', data: courseRoute ?? [] }); }, [courseRoute]);
   useEffect(() => {
     if (panTarget) post({ type: 'panTo', lat: panTarget.lat, lng: panTarget.lng });
   }, [panTarget]);
@@ -465,15 +520,18 @@ export default function KakaoMapView({
           var courses = ${JSON.stringify(courses)};
           var photos  = ${JSON.stringify(photos)};
           var rec     = ${JSON.stringify(recommendedPlaces ?? [])};
+          var route   = ${JSON.stringify(courseRoute ?? [])};
           if (mapReady) {
             syncCourses(courses);
             syncPhotos(photos);
             syncRecommended(rec);
+            syncCourseRoute(route);
           } else {
             queue.push(function() {
               syncCourses(courses);
               syncPhotos(photos);
               syncRecommended(rec);
+              syncCourseRoute(route);
             });
           }
         })();

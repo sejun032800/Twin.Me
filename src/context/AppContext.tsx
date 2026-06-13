@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { DARK_THEME, LIGHT_THEME, ThemeMode, ThemeTokens } from '../styles/theme';
 import {
   ChatStyleProfile,
@@ -12,15 +12,25 @@ import {
   PartnerSensitiveConfig,
   DEFAULT_PARTNER_SENSITIVE_CONFIG,
 } from '../services/partnerSensitiveService';
+import type { WeeklyReportData } from '../services/weeklyReportService';
+import { seedReviewStore } from '../services/partnerReviewService';
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
+export type { WeeklyReportData };
 
 export type { ChatStyleProfile };
 
 // ── Privacy Level ─────────────────────────────────────────────────────────────
 // 3 = 완전복제(Full Clone, default) · 2 = 최적화(Optimized) · 1 = 보호(Protected)
 export type PrivacyLevel = 1 | 2 | 3;
+
+// ── Couple Info ───────────────────────────────────────────────────────────────
+// startedAt: ISO date string (YYYY-MM-DD) set during onboarding partner-match step.
+// null means not yet configured → stats bar shows "D+?" placeholder.
+export interface CoupleInfo {
+  startedAt: string | null;
+}
 
 // PII masking pipeline: runs in Lv3 before any text is stored
 export function maskPII(text: string): string {
@@ -45,8 +55,11 @@ export interface DateCourse {
   longitude: number;
   myRating: number;       // 1–5 (0 = pending visit)
   myReview: string;
-  partnerRating: number;  // 1–5 (mocked until real partner sync)
+  partnerRating: number;  // 1–5 (0 = partner hasn't reviewed yet)
   partnerReview: string;
+  // Kakao place ID — set when the course is created via the Kakao place search.
+  // Used by usePartnerPlaceReview to correlate partner reviews with places.
+  kakaoPlaceId?: string;
   // Memory ring metadata
   imageUrl?: string;
   myOotd?: string;
@@ -150,6 +163,16 @@ interface AppContextValue {
   // Partner sensitive keyword config — synced from server by useChatStream (Step #20)
   partnerSensitiveConfig: PartnerSensitiveConfig;
   setPartnerSensitiveConfig: (config: PartnerSensitiveConfig) => void;
+  // Weekly report data — computed by weeklyReportService, scheduled by useReportScheduler (Step #22)
+  weeklyReportData: WeeklyReportData | null;
+  setWeeklyReportData: (data: WeeklyReportData | null) => void;
+  // Couple metadata — drives D-Day counter in history stats bar (Step #25)
+  coupleInfo: CoupleInfo;
+  setCoupleInfo: (info: Partial<CoupleInfo>) => void;
+  // Accumulated chat-media upload count — drives photo counter in history stats bar (Step #25)
+  // Incremented by chat.tsx whenever a user successfully sends an image/video bubble.
+  uploadedMediaCount: number;
+  addUploadedMedia: (delta?: number) => void;
 }
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
@@ -244,6 +267,12 @@ const AppContext = createContext<AppContextValue>({
   setRoomEarlyMode: () => {},
   partnerSensitiveConfig: DEFAULT_PARTNER_SENSITIVE_CONFIG,
   setPartnerSensitiveConfig: () => {},
+  weeklyReportData: null,
+  setWeeklyReportData: () => {},
+  coupleInfo: { startedAt: '2024-01-14' },
+  setCoupleInfo: () => {},
+  uploadedMediaCount: 0,
+  addUploadedMedia: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -265,10 +294,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isEarlyDatingMode, setIsEarlyDatingMode] = useState(false);
   const [roomEarlyModeMap, setRoomEarlyModeState] = useState<Record<string, boolean>>({});
   const [partnerSensitiveConfig, setPartnerSensitiveConfig] = useState<PartnerSensitiveConfig>(DEFAULT_PARTNER_SENSITIVE_CONFIG);
+  const [weeklyReportData, setWeeklyReportData] = useState<WeeklyReportData | null>(null);
+  const [coupleInfo, setCoupleInfoState] = useState<CoupleInfo>({ startedAt: '2024-01-14' });
+  const [uploadedMediaCount, setUploadedMediaCount] = useState(0);
+  const setCoupleInfo = (info: Partial<CoupleInfo>) =>
+    setCoupleInfoState((prev) => ({ ...prev, ...info }));
+  const addUploadedMedia = (delta = 1) =>
+    setUploadedMediaCount((prev) => prev + delta);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
     setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
+
+  // Seed the partner-review service store whenever dateCourses changes.
+  // Courses that already carry a kakaoPlaceId and a real partnerRating
+  // are registered so AddCourseSheet can display them reactively.
+  useEffect(() => {
+    seedReviewStore(dateCourses);
+  }, [dateCourses]);
 
   const addDateCourse = (course: DateCourse) =>
     setDateCourses((prev) => [course, ...prev]);
@@ -324,6 +367,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setRoomEarlyMode,
         partnerSensitiveConfig,
         setPartnerSensitiveConfig,
+        weeklyReportData,
+        setWeeklyReportData,
+        coupleInfo,
+        setCoupleInfo,
+        uploadedMediaCount,
+        addUploadedMedia,
       }}
     >
       {children}

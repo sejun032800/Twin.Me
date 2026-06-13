@@ -35,6 +35,8 @@ import { maskPII, useAppContext } from '../../src/context/AppContext';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
 import { requestSelfAiLlmResponse, requestToneRegeneration, type ChatHistoryItem } from '../../src/services/selfAiService';
 import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
+import { useReportScheduler } from '../../src/hooks/useReportScheduler';
+import { useCrisisIntelligence, CrisisMessage, CrisisAnalysisResult } from '../../src/hooks/useCrisisIntelligence';
 import { WeeklyReportModal, ReportCardBubble } from '../../src/components/chat/WeeklyReportModal';
 import {
   initChatroomRealtimeSocket,
@@ -94,16 +96,6 @@ const GIFT_CATALOG: GiftItem[] = [
   { id: 'cinema', name: '영화 티켓', emoji: '🎬', price: '14,000원' },
   { id: 'ring', name: '커플링', emoji: '💍', price: '150,000원' },
 ];
-
-// ─── Crisis detection (FUN-CHA-003) ──────────────────────────────────────────
-
-const CRISIS_KEYWORDS = [
-  '헤어져', '헤어지자', '헤어질', '짜증나', '짜증났', '너무하네',
-  '싸웠어', '연락하지마', '그만하자', '더 이상', '지쳐',
-];
-function detectCrisis(text: string) {
-  return CRISIS_KEYWORDS.some((kw) => text.includes(kw));
-}
 
 // ─── Output Splitter (FUN-CHA-001) ───────────────────────────────────────────
 
@@ -1043,7 +1035,15 @@ function ToneFeedbackSheet({
 
 // ─── Crisis Mode (FUN-CHA-003) ────────────────────────────────────────────────
 
-function CrisisMode({ visible, partnerName, onClose }: { visible: boolean; partnerName: string; onClose: () => void }) {
+function CrisisMode({
+  visible, partnerName, onClose, crisisProbability,
+}: {
+  visible: boolean;
+  partnerName: string;
+  onClose: () => void;
+  crisisProbability: number;
+}) {
+  const pctDisplay = Math.round(crisisProbability * 100);
   const pulseOpacity = useSharedValue(0);
   const cardScale = useSharedValue(0.88);
   const cardOpacity = useSharedValue(0);
@@ -1080,7 +1080,7 @@ function CrisisMode({ visible, partnerName, onClose }: { visible: boolean; partn
           <View style={styles.crisisReflectionBox}>
             <Text style={styles.crisisReflectionText}>
               방금 전 {partnerName}이의 대화에 당신이 보낸 문장은 {partnerName}이에게 단순한 반박을 넘어{' '}
-              <Text style={styles.crisisHighlight}>깊은 거절감을 주었을 확률이 84%</Text>입니다.
+              <Text style={styles.crisisHighlight}>깊은 거절감을 주었을 확률이 {pctDisplay}%</Text>입니다.
             </Text>
             <Text style={[styles.crisisReflectionText, { marginTop: 12 }]}>
               당신은 대화를 빨리 끝내기 위해 {partnerName}이의 서운함을{' '}
@@ -1106,6 +1106,202 @@ function CrisisMode({ visible, partnerName, onClose }: { visible: boolean; partn
     </View>
   );
 }
+
+// ─── [Step #23] Crisis Warning Bar ───────────────────────────────────────────
+// Persistent banner shown at the top of the chat when crisisActive is true.
+// Tapping it opens the full CrisisMode reflection overlay.
+
+function CrisisWarningBar({
+  crisisResult, onPress,
+}: {
+  crisisResult: CrisisAnalysisResult;
+  onPress: () => void;
+}) {
+  const translateY = useSharedValue(-52);
+  const opacity = useSharedValue(0);
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    translateY.value = withSpring(0, { damping: 18, stiffness: 220 });
+    opacity.value = withTiming(1, { duration: 260 });
+    pulse.value = withRepeat(
+      withSequence(withTiming(0.72, { duration: 750 }), withTiming(1, { duration: 750 })),
+      -1, false,
+    );
+  }, [translateY, opacity, pulse]);
+
+  const barStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  const pct = Math.round(crisisResult.crisisProbability * 100);
+
+  return (
+    <Animated.View style={[crisisBarStyles.bar, barStyle]}>
+      <Animated.View style={[crisisBarStyles.pulse, pulseStyle]} />
+      <TouchableOpacity style={crisisBarStyles.inner} onPress={onPress} activeOpacity={0.85}>
+        <Text style={crisisBarStyles.icon}>🚨</Text>
+        <View style={crisisBarStyles.textWrap}>
+          <Text style={crisisBarStyles.title}>현재 두 분의 대화 온도가 급격히 낮아졌어요</Text>
+          <Text style={crisisBarStyles.sub}>위기 감지 {pct}% · 탭하여 자세히 보기</Text>
+        </View>
+        <Text style={crisisBarStyles.chevron}>›</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const crisisBarStyles = StyleSheet.create({
+  bar: {
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 2,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(239,68,68,0.55)',
+    backgroundColor: 'rgba(127,0,43,0.18)',
+  },
+  pulse: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(239,68,68,0.10)',
+  },
+  inner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  icon: { fontSize: 20 },
+  textWrap: { flex: 1 },
+  title: { color: '#FCA5A5', fontSize: 13, fontWeight: '700', letterSpacing: -0.2 },
+  sub: { color: 'rgba(252,165,165,0.65)', fontSize: 11, marginTop: 1 },
+  chevron: { color: '#F87171', fontSize: 20, fontWeight: '300' },
+});
+
+// ─── [Step #23] Repair Bids Bar ───────────────────────────────────────────────
+// Horizontal scroll of contextual reconciliation prompts shown above the input
+// when crisis is active. Tapping a bid pre-fills the text input.
+
+const REPAIR_BIDS = [
+  '우리 잠깐 쉬면서 얘기할까? 🤍',
+  '지금 많이 힘들지? 같이 해결해나가자 💪',
+  '미안해, 내가 표현이 서툴렀어 🥺',
+  '네 말이 맞아, 내가 좀 더 들을게 👂',
+  '잠깐 안아줄 수 있어? 🫂',
+];
+
+function RepairBidsBar({ onSelect }: { onSelect: (text: string) => void }) {
+  const translateY = useSharedValue(40);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withSpring(0, { damping: 20, stiffness: 240 });
+    opacity.value = withTiming(1, { duration: 220 });
+  }, [translateY, opacity]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  return (
+    <Animated.View style={[repairStyles.wrap, animStyle]}>
+      <Text style={repairStyles.label}>💬 화해 유도 문장</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={repairStyles.scroll}>
+        {REPAIR_BIDS.map((bid) => (
+          <TouchableOpacity
+            key={bid}
+            style={repairStyles.chip}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onSelect(bid);
+            }}
+            activeOpacity={0.78}
+          >
+            <Text style={repairStyles.chipText}>{bid}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </Animated.View>
+  );
+}
+
+const repairStyles = StyleSheet.create({
+  wrap: {
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(239,68,68,0.28)',
+    backgroundColor: 'rgba(127,0,43,0.07)',
+  },
+  label: {
+    color: 'rgba(252,165,165,0.70)',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    paddingHorizontal: 14,
+    marginBottom: 5,
+  },
+  scroll: { paddingHorizontal: 12, paddingBottom: 10, gap: 8 },
+  chip: {
+    backgroundColor: 'rgba(239,68,68,0.10)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.38)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  chipText: { color: '#FCA5A5', fontSize: 13, fontWeight: '500' },
+});
+
+// ─── [Step #23] Red Neon Pulse Border ────────────────────────────────────────
+// Animated absolute-fill overlay that adds a pulsing red neon border glow
+// when the crisis score exceeds the warning threshold. Renders behind all
+// interactive content (pointerEvents="none").
+
+function CrisisPulseBorder({ visible }: { visible: boolean }) {
+  const opacity = useSharedValue(0);
+  const borderOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      opacity.value = withRepeat(
+        withSequence(withTiming(0.22, { duration: 800 }), withTiming(0.06, { duration: 800 })),
+        -1, false,
+      );
+      borderOpacity.value = withTiming(1, { duration: 400 });
+    } else {
+      opacity.value = withTiming(0, { duration: 300 });
+      borderOpacity.value = withTiming(0, { duration: 300 });
+    }
+  }, [visible, opacity, borderOpacity]);
+
+  const glowStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const borderStyle = useAnimatedStyle(() => ({ opacity: borderOpacity.value }));
+
+  return (
+    <View style={crisisPulseStyles.root} pointerEvents="none">
+      <Animated.View style={[crisisPulseStyles.glow, glowStyle]} />
+      <Animated.View style={[crisisPulseStyles.border, borderStyle]} />
+    </View>
+  );
+}
+
+const crisisPulseStyles = StyleSheet.create({
+  root: { ...StyleSheet.absoluteFill, zIndex: 0 },
+  glow: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(190,18,60,0.14)',
+  },
+  border: {
+    ...StyleSheet.absoluteFill,
+    borderWidth: 2.5,
+    borderColor: 'rgba(239,68,68,0.62)',
+    borderRadius: 0,
+  },
+});
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
@@ -1277,6 +1473,9 @@ function ChatRoomView({
   const pendingSendTextRef = useRef<string>('');
   // Step #21: tone regeneration loading overlay
   const [isToneRegenerating, setIsToneRegenerating] = useState(false);
+  // Step #23: crisis intelligence engine
+  const { result: crisisResult, runAnalysis: runCrisisAnalysis } = useCrisisIntelligence();
+  const crisisModalShownRef = useRef(false);
 
   const toneWeightRef = useRef<ToneWeight>({ warmth: 0, humor: 0 });
   // Step #18: rolling chat history ref for multi-turn LLM context
@@ -1285,6 +1484,18 @@ function ChatRoomView({
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMessages = useRef<string[]>([]);
   const lastSendTimeRef = useRef<number>(0);
+
+  // Step #23: watch LLM-computed crisis score — fire modal once per crisis episode
+  useEffect(() => {
+    if (crisisResult?.crisisModalTrigger && !crisisModalShownRef.current) {
+      crisisModalShownRef.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      setTimeout(() => setCrisisVisible(true), 600);
+    }
+    if (!crisisResult?.crisisModalTrigger) {
+      crisisModalShownRef.current = false;
+    }
+  }, [crisisResult?.crisisModalTrigger]);
 
   const addMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -1509,9 +1720,15 @@ function ChatRoomView({
 
     if (roomType === 'partner') streamState.tapMessage(text);
 
-    if (detectCrisis(text)) {
-      setTimeout(() => setCrisisVisible(true), 400);
-      return;
+    // Step #23: async psychological analysis — replaces static keyword check
+    if (roomType === 'partner' || roomType === 'ai') {
+      const snapshot: CrisisMessage[] = [...chatHistoryRef.current].map((m) => ({
+        role: m.role,
+        text: m.text,
+        timestamp: m.timestamp,
+        type: m.type,
+      }));
+      runCrisisAnalysis(snapshot);
     }
 
     if (!config.isReal && gap > 200 && gap < 10_000 && privacyLevel === 3) {
@@ -1673,8 +1890,13 @@ function ChatRoomView({
     ? streamState.pendingToneAlerts[0]
     : null;
 
+  const crisisActive = crisisResult?.crisisActive ?? false;
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]} edges={['top']}>
+      {/* Step #23: Red neon pulse border — renders behind all content */}
+      <CrisisPulseBorder visible={crisisActive} />
+
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: t.divider, backgroundColor: t.headerBg }]}>
         <View style={styles.headerLeft}>
@@ -1709,6 +1931,14 @@ function ChatRoomView({
           />
         )}
       </View>
+
+      {/* Step #23: Crisis warning bar — shown when probability >= 0.75 */}
+      {crisisActive && crisisResult && (
+        <CrisisWarningBar
+          crisisResult={crisisResult}
+          onPress={() => setCrisisVisible(true)}
+        />
+      )}
 
       {/* Profile HUD (AI rooms only) */}
       {roomType !== 'partner' && <ProfileHUD profile={chatStyleProfile} t={t} />}
@@ -1764,6 +1994,11 @@ function ChatRoomView({
           />
         )}
 
+        {/* Step #23: Repair bids — shown when crisis is active */}
+        {crisisActive && (
+          <RepairBidsBar onSelect={(bid) => setInputText(bid)} />
+        )}
+
         <View style={[styles.inputRow, { backgroundColor: t.bg, borderTopColor: t.divider }]}>
           <TextInput
             style={[styles.input, { backgroundColor: t.inputBg, color: t.text }]}
@@ -1792,7 +2027,12 @@ function ChatRoomView({
         onClose={() => { setFeedbackVisible(false); setSelectedMessage(null); }}
         onSelect={handleToneFeedback}
       />
-      <CrisisMode visible={crisisVisible} partnerName={partnerName} onClose={() => setCrisisVisible(false)} />
+      <CrisisMode
+        visible={crisisVisible}
+        partnerName={partnerName}
+        onClose={() => setCrisisVisible(false)}
+        crisisProbability={crisisResult?.crisisProbability ?? 0.84}
+      />
 
       {/* [Step #20] Sensitive Intercept Modal */}
       <SensitiveInterceptModal
@@ -1950,6 +2190,9 @@ export default function ChatScreen() {
   const partnerName = partnerProfile.name;
   const [activeRoom, setActiveRoom] = useState<RoomType | null>(null);
   const [reportModalVisible, setReportModalVisible] = useState(false);
+
+  // Step #22 — weekly report scheduler: cold-start hydration + upload trigger + Sunday 22:00 cron
+  useReportScheduler();
 
   const streamState = useChatStream();
 

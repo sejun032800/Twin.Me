@@ -244,3 +244,64 @@ export async function requestSelfAiLlmResponse(
     clearTimeout(timeoutHandle);
   }
 }
+
+// ── Tone Regeneration (Step #21) ─────────────────────────────────────────────
+
+function buildToneRegenSystemPrompt(originalMessage: string, detectedKeyword: string): string {
+  return [
+    '[TONE_REGENERATION_PROTOCOL]',
+    '당신은 Twin.me 앱의 말투 교정 전문 AI입니다.',
+    `유저가 입력한 원문: "${originalMessage}"`,
+    `감지된 민감 단어: "${detectedKeyword}"`,
+    '',
+    '## 필수 규칙 (최우선 적용)',
+    `1. 원문("${originalMessage}")의 핵심 의미와 감정은 반드시 보존하세요.`,
+    `2. 감지된 민감 단어("${detectedKeyword}")를 중심으로 발생할 수 있는 공격성, 날선 어조, 무뚝뚝함을 완전히 걷어내세요.`,
+    '3. 연인에게 상처를 주지 않고 진심을 부드럽고 다정하게 전달할 수 있는 세련된 대안 문장을 작성하세요.',
+    '4. 반드시 한국어로 답변하세요.',
+    '5. 아래 출력 형식을 정확히 따르세요:',
+    '   💌 [배려 섞인 대안 문장 — 연인에게 실제로 보낼 수 있는 완성형 문장]',
+    '',
+    '   💡 [코칭 한 마디 — 왜 이 표현이 더 배려 섞인 표현인지 1문장으로 설명]',
+  ].join('\n');
+}
+
+/**
+ * Regenerates a user message with a gentler tone by injecting TONE_REGENERATION_PROTOCOL
+ * as the highest-priority system prompt. Unlike requestSelfAiLlmResponse, this function
+ * throws on failure — callers must catch and restore the original text to the input.
+ */
+export async function requestToneRegeneration(
+  originalMessage: string,
+  detectedKeyword: string,
+  ctx: SelfAiContext,
+): Promise<string> {
+  const systemPrompt = buildToneRegenSystemPrompt(originalMessage, detectedKeyword);
+  const messages: ChatHistoryItem[] = [
+    {
+      role: 'user',
+      content: `위 규칙에 맞춰 원문 "${originalMessage}"을 배려 섞인 대안 문장으로 가공해줘.`,
+    },
+  ];
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    if (API_BASE) {
+      return await withTimeout(
+        callBackendProxy(systemPrompt, messages, controller.signal, ctx.isRoomEarlyMode),
+        TIMEOUT_MS,
+      );
+    }
+    if (ANTHROPIC_KEY) {
+      return await withTimeout(
+        callClaudeDirectly(systemPrompt, messages, controller.signal),
+        TIMEOUT_MS,
+      );
+    }
+    throw new Error('NO_API_CONFIGURED');
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}

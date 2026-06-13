@@ -8,8 +8,13 @@ import {
   FALLBACK_MOOD_TAGS,
   PartnerAiMoodTag,
 } from '../services/partnerMoodService';
+import {
+  PartnerSensitiveConfig,
+  DEFAULT_PARTNER_SENSITIVE_CONFIG,
+} from '../services/partnerSensitiveService';
 
 export type { PartnerAiMoodTag };
+export type { PartnerSensitiveConfig };
 
 export type { ChatStyleProfile };
 
@@ -142,6 +147,9 @@ interface AppContextValue {
   // Survives ChatRoomView unmount since it lives in AppContext.
   roomEarlyModeMap: Record<string, boolean>;
   setRoomEarlyMode: (roomId: string, value: boolean) => void;
+  // Partner sensitive keyword config — synced from server by useChatStream (Step #20)
+  partnerSensitiveConfig: PartnerSensitiveConfig;
+  setPartnerSensitiveConfig: (config: PartnerSensitiveConfig) => void;
 }
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
@@ -234,6 +242,8 @@ const AppContext = createContext<AppContextValue>({
   setIsEarlyDatingMode: () => {},
   roomEarlyModeMap: {},
   setRoomEarlyMode: () => {},
+  partnerSensitiveConfig: DEFAULT_PARTNER_SENSITIVE_CONFIG,
+  setPartnerSensitiveConfig: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -254,6 +264,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [partnerAiMood, setPartnerAiMood] = useState<PartnerAiMoodTag[]>(FALLBACK_MOOD_TAGS);
   const [isEarlyDatingMode, setIsEarlyDatingMode] = useState(false);
   const [roomEarlyModeMap, setRoomEarlyModeState] = useState<Record<string, boolean>>({});
+  const [partnerSensitiveConfig, setPartnerSensitiveConfig] = useState<PartnerSensitiveConfig>(DEFAULT_PARTNER_SENSITIVE_CONFIG);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
     setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
 
@@ -311,6 +322,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setIsEarlyDatingMode,
         roomEarlyModeMap,
         setRoomEarlyMode,
+        partnerSensitiveConfig,
+        setPartnerSensitiveConfig,
       }}
     >
       {children}

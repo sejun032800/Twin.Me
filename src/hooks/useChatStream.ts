@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAppContext } from '../context/AppContext';
+import { syncPartnerSensitiveKeywords } from '../services/partnerSensitiveService';
 
 // ─── Tone patterns (날카롭거나 공격적인 표현) ─────────────────────────────────
 
@@ -29,23 +31,6 @@ const TONE_PATTERNS: { keywords: string[]; suggestion: string }[] = [
   },
 ];
 
-// ─── Partner sensitive topics (파트너 설정 트라우마 키워드 — mock) ─────────────
-
-const SENSITIVE_TOPICS: { keywords: string[]; label: string }[] = [
-  {
-    keywords: ['전 남자친구', '전 남친', '전 여자친구', '전 여친', '예전 남자', '예전 여자', '옛날 애인'],
-    label: '전 연인 언급',
-  },
-  {
-    keywords: ['살쪘', '뚱뚱', '살 쪘', '몸무게', '다이어트 해'],
-    label: '외모/체형 발언',
-  },
-  {
-    keywords: ['가족이 왜', '부모님이 왜', '집안이'],
-    label: '가족 관련 발언',
-  },
-];
-
 // ─── Deadlock nudge messages (5분 침묵 후) ────────────────────────────────────
 
 const DEADLOCK_NUDGES = [
@@ -53,6 +38,19 @@ const DEADLOCK_NUDGES = [
   '대화가 5분 넘게 멈췄어요. "오늘 뭐 먹고 싶어?" 한 마디로 시작해보는 건 어떨까요? 🍽️',
   '서영이가 좋아하는 드라마 이야기를 꺼내보는 건 어때요? 가볍게 "요즘 뭐 봐?" 로 시작해보세요 🎬',
 ];
+
+// ─── Text normalizer — bypass-attack defense ────────────────────────────────
+// Strips zero-width / invisible chars and collapses arbitrary whitespace /
+// separators so that "살  쪘", "살-쪘", "살​쪘" all match "살쪘".
+
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/[​-‍﻿­᠎⁠]/g, '') // zero-width & soft-hyphen
+    .replace(/[\s\-_·•※~]+/g, ' ')                            // collapse separators → space
+    .trim()
+    .toLowerCase();
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,12 +67,18 @@ export interface SensitiveWarning {
   message: string;
 }
 
+export interface SensitiveInterceptResult {
+  detectedKeyword: string;
+  label: string;
+}
+
 export interface ChatStreamReturn {
   pendingToneAlerts: ToneAlert[];
   sensitiveWarning: SensitiveWarning | null;
   deadlockNudge: string | null;
   tapMessage: (text: string) => void;
   checkSensitive: (text: string) => void;
+  validateMessageSensitivity: (text: string) => SensitiveInterceptResult | null;
   dismissToneAlert: (id: string) => void;
   clearDeadlockNudge: () => void;
 }
@@ -82,17 +86,41 @@ export interface ChatStreamReturn {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useChatStream(): ChatStreamReturn {
+  const { coupleId, partnerSensitiveConfig, setPartnerSensitiveConfig } = useAppContext();
+
   const [pendingToneAlerts, setPendingToneAlerts] = useState<ToneAlert[]>([]);
   const [sensitiveWarning, setSensitiveWarning] = useState<SensitiveWarning | null>(null);
   const [deadlockNudge, setDeadlockNudge] = useState<string | null>(null);
 
   const deadlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Sync partner sensitive config: on mount + 30 s poll ─────────────────────
+  // Aborts in-flight request on coupleId change or hook unmount.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const doSync = async () => {
+      const fresh = await syncPartnerSensitiveKeywords(coupleId, controller.signal);
+      if (!controller.signal.aborted) {
+        setPartnerSensitiveConfig(fresh);
+      }
+    };
+
+    doSync();
+    const poll = setInterval(doSync, 30_000);
+
+    return () => {
+      controller.abort();
+      clearInterval(poll);
+    };
+  }, [coupleId, setPartnerSensitiveConfig]);
+
+  // ── Deadlock timer ──────────────────────────────────────────────────────────
   const resetDeadlock = useCallback(() => {
     if (deadlockTimer.current) clearTimeout(deadlockTimer.current);
     deadlockTimer.current = setTimeout(() => {
       setDeadlockNudge(DEADLOCK_NUDGES[Math.floor(Math.random() * DEADLOCK_NUDGES.length)]);
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 5 * 60 * 1000);
   }, []);
 
   useEffect(() => {
@@ -100,6 +128,7 @@ export function useChatStream(): ChatStreamReturn {
     return () => { if (deadlockTimer.current) clearTimeout(deadlockTimer.current); };
   }, [resetDeadlock]);
 
+  // ── Tap: tone pattern analysis (AI room ingestion) ──────────────────────────
   const tapMessage = useCallback((text: string) => {
     resetDeadlock();
     for (const pattern of TONE_PATTERNS) {
@@ -120,18 +149,41 @@ export function useChatStream(): ChatStreamReturn {
     }
   }, [resetDeadlock]);
 
+  // ── Real-time banner: fires while typing, shows inline yellow warning ────────
   const checkSensitive = useCallback((text: string) => {
-    for (const topic of SENSITIVE_TOPICS) {
-      if (topic.keywords.some((kw) => text.includes(kw))) {
+    if (!partnerSensitiveConfig.isWarningEnabled || !text) {
+      setSensitiveWarning(null);
+      return;
+    }
+    const normText = normalizeForMatch(text);
+    for (const kw of partnerSensitiveConfig.keywords) {
+      if (normText.includes(normalizeForMatch(kw))) {
         setSensitiveWarning({
-          label: topic.label,
-          message: `잠깐! 서영이의 AI 데이터에 따르면, '${topic.label}' 주제는 상대방에게 큰 스트레스를 줄 수 있어요.`,
+          label: kw,
+          message: `잠깐! 파트너의 AI 데이터에 따르면, '${kw}' 주제는 상대방에게 큰 스트레스를 줄 수 있어요.`,
         });
         return;
       }
     }
     setSensitiveWarning(null);
-  }, []);
+  }, [partnerSensitiveConfig]);
+
+  // ── Pre-send intercept: called the instant [전송] is pressed ─────────────────
+  // Pure — no state mutation. Returns matched result or null.
+  // Caller is responsible for halting the send pipeline on non-null return.
+  const validateMessageSensitivity = useCallback(
+    (text: string): SensitiveInterceptResult | null => {
+      if (!partnerSensitiveConfig.isWarningEnabled) return null;
+      const normText = normalizeForMatch(text);
+      for (const kw of partnerSensitiveConfig.keywords) {
+        if (normText.includes(normalizeForMatch(kw))) {
+          return { detectedKeyword: kw, label: kw };
+        }
+      }
+      return null;
+    },
+    [partnerSensitiveConfig],
+  );
 
   const dismissToneAlert = useCallback((id: string) => {
     setPendingToneAlerts((prev) => prev.filter((a) => a.id !== id));
@@ -145,6 +197,7 @@ export function useChatStream(): ChatStreamReturn {
     deadlockNudge,
     tapMessage,
     checkSensitive,
+    validateMessageSensitivity,
     dismissToneAlert,
     clearDeadlockNudge,
   };

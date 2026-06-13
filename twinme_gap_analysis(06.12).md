@@ -78,16 +78,17 @@
 | 지도 뷰 | GPS 실시간 현재 위치 (AI 뮤즈 컨텍스트) | ❌ 미구현 | `expo-location` 권한 요청 및 현재 좌표 획득 없음. |
 | 히스토리 탭 전체 | DNA 나선 모드 (3D 헬릭스 타워 뷰) | ❌ 미구현 | SRS 명세의 핵심 뷰. 세그먼트 컨트롤에 `'archive'`와 `'map'` 두 탭만 있고 나선형 타임라인 뷰 없음. 3D 회전·카메라 시점 제어·Sentiment Ribbon 모두 미구현. |
 
-// 여기부터 프롬프트 안짬
 ---
 
 ## 설정 탭
 
 | 화면 / 탭 위치 | UI 요소 및 버튼명 | 구현 현황 | 미실시 사유 및 누락된 구체적 엔진 로직 |
-| :--- | :--- | :--- | :--- |
-| 설정 - 프로필 헤더 | 이름 표시 ("세준 AI 관리 센터") | ❌ 미실시 (UI Only) | `settings/index.tsx:743` 하드코딩. `useAppContext().myProfile.name` 미사용. |
+| 설정 - 프로필 헤더 | 이름 표시 ("사용자 AI 관리 센터") | ❌ 미실시 (UI Only) | `settings/index.tsx:743` 하드코딩. `useAppContext().myProfile.name` 미사용. |
 | 설정 - 프로필 헤더 | 프로필 아바타 사진 | ❌ 미구현 (UI Only) | `🙋‍♂️` 이모지 고정. 실제 프로필 사진 업로드/표시 없음. |
 | 설정 - 프라이버시 슬라이더 | privacyLevel 전역 상태 연동 | ✅ 완료 | AppContext.privacyLevel에 저장됨. |
+// 여기부터 프롬프트 안짬
+
+
 | 설정 - 프라이버시 슬라이더 | privacyLevel 실제 데이터 수집 차단 (백엔드) | ❌ 미실시 (부분 구현) | 슬라이더 값은 `AppContext.privacyLevel`에 저장되고 `chat.tsx`/`history.tsx` 일부 조건분기에 활용되나, 실제 서버사이드 데이터 수집 파이프라인 차단·활성화 API 없음. |
 | 설정 - 기억 삭제 지우개 | 기억 항목 목록 (학습 데이터 목록) | ❌ 미실시 (UI Only) | `settings/index.tsx:441~447` `MEMORY_ITEMS` 5개 하드코딩. 실제 벡터 DB에서 학습 항목 조회 없음. |
 | 설정 - 기억 삭제 지우개 | [🔥 영구 파기 실행] 버튼 | ❌ 미구현 (UI Only) | 확인 모달 → 파티클 dissolve 애니메이션만 실행. 벡터 DB에서 임베딩 삭제하는 API 호출 없음. |

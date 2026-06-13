@@ -5,6 +5,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -32,8 +33,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { maskPII, useAppContext } from '../../src/context/AppContext';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
-import { requestSelfAiLlmResponse, type ChatHistoryItem } from '../../src/services/selfAiService';
-import { useChatStream, ChatStreamReturn, ToneAlert } from '../../src/hooks/useChatStream';
+import { requestSelfAiLlmResponse, requestToneRegeneration, type ChatHistoryItem } from '../../src/services/selfAiService';
+import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
 import { WeeklyReportModal, ReportCardBubble } from '../../src/components/chat/WeeklyReportModal';
 import {
   initChatroomRealtimeSocket,
@@ -320,6 +321,355 @@ function SensitiveWarningBanner({ message, onDismiss }: { message: string; onDis
     </Animated.View>
   );
 }
+
+// ─── Sensitive Intercept Modal (Step #20) ─────────────────────────────────────
+// Pre-send hard stop: shown the instant [전송] is pressed if a partner-set
+// trauma keyword is detected. User chooses to force-send or revise the message.
+
+function SensitiveInterceptModal({
+  visible,
+  intercept,
+  onForceSend,
+  onRevise,
+  onToneRegenerate,
+}: {
+  visible: boolean;
+  intercept: SensitiveInterceptResult | null;
+  onForceSend: () => void;
+  onRevise: () => void;
+  onToneRegenerate: () => void;
+}) {
+  const scale = useSharedValue(0.88);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      scale.value = withSpring(1, { damping: 16, stiffness: 240 });
+      opacity.value = withTiming(1, { duration: 180 });
+    } else {
+      scale.value = withTiming(0.88, { duration: 140 });
+      opacity.value = withTiming(0, { duration: 140 });
+    }
+  }, [visible, scale, opacity]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
+
+  if (!intercept) return null;
+
+  return (
+    <Modal transparent animationType="none" visible={visible} onRequestClose={onRevise}>
+      <View style={interceptStyles.backdrop}>
+        <View style={interceptStyles.redPulse} pointerEvents="none" />
+        <Animated.View style={[interceptStyles.card, cardStyle]}>
+          {/* Top accent line */}
+          <View style={interceptStyles.accentLine} />
+
+          <View style={interceptStyles.iconRow}>
+            <Text style={interceptStyles.iconEmoji}>🚨</Text>
+          </View>
+
+          <Text style={interceptStyles.title}>앗, 잠시만요!</Text>
+
+          <Text style={interceptStyles.body}>
+            현재 입력하신 내용에 상대방이 지정한 민감 주제(예:{' '}
+            <Text style={interceptStyles.keyword}>'{intercept.detectedKeyword}'</Text>
+            )가 포함되어 있어요.{'\n\n'}한 번 더 배려 섞인 표현으로 다듬어보는 건 어떨까요?
+          </Text>
+
+          <View style={interceptStyles.btnRow}>
+            {/* Primary: AI tone regeneration (Step #21) */}
+            <TouchableOpacity
+              style={interceptStyles.btnPrimary}
+              onPress={onToneRegenerate}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={interceptStyles.btnPrimaryGrad}
+              >
+                <Text style={interceptStyles.btnPrimaryText}>✨ 트윈이가 다정하게 다듬어줘</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Secondary: manual revise */}
+            <TouchableOpacity
+              style={interceptStyles.btnRevise}
+              onPress={onRevise}
+              activeOpacity={0.75}
+            >
+              <Text style={interceptStyles.btnReviseText}>직접 수정할게요</Text>
+            </TouchableOpacity>
+
+            {/* Tertiary: force send */}
+            <TouchableOpacity
+              style={interceptStyles.btnSecondary}
+              onPress={onForceSend}
+              activeOpacity={0.75}
+            >
+              <Text style={interceptStyles.btnSecondaryText}>그냥 보낼게요</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+const interceptStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 13, 26, 0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  // Soft red ambient glow behind the card
+  redPulse: {
+    position: 'absolute',
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(239, 68, 68, 0.07)',
+    alignSelf: 'center',
+    top: '35%',
+  },
+  card: {
+    width: '100%',
+    backgroundColor: 'rgba(18, 10, 35, 0.98)',
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    paddingHorizontal: 24,
+    paddingTop: 0,
+    paddingBottom: 24,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    elevation: 18,
+  },
+  accentLine: {
+    height: 3,
+    backgroundColor: '#EF4444',
+    borderRadius: 2,
+    marginBottom: 20,
+    opacity: 0.8,
+  },
+  iconRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  iconEmoji: {
+    fontSize: 38,
+  },
+  title: {
+    color: '#F1F5F9',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+    marginBottom: 14,
+  },
+  body: {
+    color: '#CBD5E1',
+    fontSize: 14,
+    lineHeight: 23,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  keyword: {
+    color: '#FCA5A5',
+    fontWeight: '700',
+  },
+  btnRow: {
+    gap: 10,
+  },
+  btnRevise: {
+    borderRadius: 50,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: 'rgba(100, 116, 139, 0.10)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(100, 116, 139, 0.30)',
+  },
+  btnReviseText: {
+    color: '#94A3B8',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  btnSecondary: {
+    borderRadius: 50,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.10)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(239, 68, 68, 0.38)',
+  },
+  btnSecondaryText: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  btnPrimary: {
+    borderRadius: 50,
+    overflow: 'hidden',
+  },
+  btnPrimaryGrad: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  btnPrimaryText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
+
+// ─── [Step #21] Tone Regeneration Loading Overlay ────────────────────────────
+// Glassmorphism-style full-screen overlay shown while the LLM is refining
+// the user's message into a gentler, more considerate tone.
+
+function ToneRegenerationLoadingOverlay() {
+  const shimmer = useSharedValue(0);
+  const dotY1 = useSharedValue(0);
+  const dotY2 = useSharedValue(0);
+  const dotY3 = useSharedValue(0);
+  const cardScale = useSharedValue(0.9);
+  const cardOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    cardScale.value = withSpring(1, { damping: 14, stiffness: 200 });
+    cardOpacity.value = withTiming(1, { duration: 240 });
+    shimmer.value = withRepeat(withTiming(1, { duration: 1600 }), -1, true);
+    const bounce = (sv: typeof dotY1, delay: number) => {
+      setTimeout(() => {
+        sv.value = withRepeat(
+          withSequence(withSpring(-5, { damping: 4, stiffness: 180 }), withSpring(0, { damping: 4, stiffness: 180 })),
+          -1, false,
+        );
+      }, delay);
+    };
+    bounce(dotY1, 0); bounce(dotY2, 210); bounce(dotY3, 420);
+  }, [shimmer, dotY1, dotY2, dotY3, cardScale, cardOpacity]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: cardScale.value }],
+    opacity: cardOpacity.value,
+  }));
+  const shimmerStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(shimmer.value, [0, 0.5, 1], [0, 0.55, 0]),
+    transform: [{ translateX: interpolate(shimmer.value, [0, 1], [-130, 130]) }],
+  }));
+  const d1 = useAnimatedStyle(() => ({ transform: [{ translateY: dotY1.value }] }));
+  const d2 = useAnimatedStyle(() => ({ transform: [{ translateY: dotY2.value }] }));
+  const d3 = useAnimatedStyle(() => ({ transform: [{ translateY: dotY3.value }] }));
+
+  return (
+    <View style={regenOverlayStyles.backdrop}>
+      <Animated.View style={[regenOverlayStyles.card, cardStyle]}>
+        {/* Glass gradient background */}
+        <LinearGradient
+          colors={['rgba(124,58,237,0.22)', 'rgba(217,70,239,0.14)', 'rgba(255,107,139,0.08)']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        {/* Shimmer sweep layer */}
+        <View style={regenOverlayStyles.shimmerClip}>
+          <Animated.View style={[regenOverlayStyles.shimmerBar, shimmerStyle]}>
+            <LinearGradient
+              colors={['transparent', 'rgba(217,70,239,0.32)', 'transparent']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        </View>
+        <Text style={regenOverlayStyles.sparkle}>✨</Text>
+        <Text style={regenOverlayStyles.title}>문장을 다듬고 있어요</Text>
+        <Text style={regenOverlayStyles.subtitle}>
+          트윈이가 상대방을 배려하는{'\n'}다정한 문장으로 다듬고 있어요...
+        </Text>
+        <View style={regenOverlayStyles.dotRow}>
+          <Animated.View style={[regenOverlayStyles.dot, d1]} />
+          <Animated.View style={[regenOverlayStyles.dot, d2]} />
+          <Animated.View style={[regenOverlayStyles.dot, d3]} />
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+const regenOverlayStyles = StyleSheet.create({
+  backdrop: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(10, 13, 26, 0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    zIndex: 200,
+  },
+  card: {
+    width: '100%',
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(217,70,239,0.38)',
+    paddingVertical: 40,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    backgroundColor: 'rgba(18, 10, 35, 0.96)',
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    elevation: 20,
+    overflow: 'hidden',
+  },
+  shimmerClip: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    overflow: 'hidden',
+  },
+  shimmerBar: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 120,
+  },
+  sparkle: {
+    fontSize: 42,
+    marginBottom: 14,
+  },
+  title: {
+    color: '#F1F5F9',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#94A3B8',
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 26,
+  },
+  dotRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: Colors.GRADIENT_MID,
+  },
+});
 
 // ─── Tone Guide Popup (Drop-in for AI room) ───────────────────────────────────
 
@@ -921,6 +1271,12 @@ function ChatRoomView({
   const [giftSheetVisible, setGiftSheetVisible] = useState(false);
   // Step #18: LLM call in-flight indicator
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Step #20: sensitive keyword intercept modal
+  const [interceptVisible, setInterceptVisible] = useState(false);
+  const [interceptResult, setInterceptResult] = useState<SensitiveInterceptResult | null>(null);
+  const pendingSendTextRef = useRef<string>('');
+  // Step #21: tone regeneration loading overlay
+  const [isToneRegenerating, setIsToneRegenerating] = useState(false);
 
   const toneWeightRef = useRef<ToneWeight>({ warmth: 0, humor: 0 });
   // Step #18: rolling chat history ref for multi-turn LLM context
@@ -1140,9 +1496,8 @@ function ChatRoomView({
     setChatStyleProfile({ burstInterval: newBurst, avgCharsPerBubble: newAvg, typingSpeedFactor: newSpeed, splitTriggerPatterns: pats });
   }, [setChatStyleProfile]);
 
-  const handleSend = useCallback(() => {
-    const text = inputText.trim();
-    if (!text) return;
+  // ── Core send pipeline (called after intercept check passes) ─────────────────
+  const doSend = useCallback((text: string) => {
     setInputText('');
     streamState.checkSensitive('');
 
@@ -1171,7 +1526,82 @@ function ChatRoomView({
       pendingMessages.current = [];
       triggerAIReply(batch);
     }, profileRef.current.burstInterval);
-  }, [inputText, addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState]);
+  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState]);
+
+  // ── [Step #20] Sensitive intercept → modal → [force send] or [revise] ────────
+  const handleSend = useCallback(() => {
+    const text = inputText.trim();
+    if (!text) return;
+
+    if (roomType === 'partner') {
+      const hit = streamState.validateMessageSensitivity(text);
+      if (hit) {
+        pendingSendTextRef.current = text;
+        setInterceptResult(hit);
+        setInterceptVisible(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+    }
+
+    doSend(text);
+  }, [inputText, roomType, streamState, doSend]);
+
+  const handleForceSend = useCallback(() => {
+    setInterceptVisible(false);
+    setInterceptResult(null);
+    const text = pendingSendTextRef.current;
+    pendingSendTextRef.current = '';
+    if (text) doSend(text);
+  }, [doSend]);
+
+  const handleCancelSend = useCallback(() => {
+    setInterceptVisible(false);
+    setInterceptResult(null);
+    pendingSendTextRef.current = '';
+    // Input text preserved — user edits and retries
+  }, []);
+
+  // ── [Step #21] Tone regeneration: sends originalMessage+keyword to LLM with
+  // TONE_REGENERATION_PROTOCOL override; adds refined AI message to the list.
+  // On any failure, restores the original text to the input (rollback guard).
+  const handleToneRegenerate = useCallback(async () => {
+    const originalText = pendingSendTextRef.current;
+    const keyword = interceptResult?.detectedKeyword ?? '';
+
+    setInterceptVisible(false);
+    setInterceptResult(null);
+    pendingSendTextRef.current = '';
+
+    setIsToneRegenerating(true);
+    try {
+      const refined = await requestToneRegeneration(
+        originalText,
+        keyword,
+        {
+          myProfile,
+          trainingResult,
+          chatStyleProfile: profileRef.current,
+          isEarlyDatingMode,
+          isRoomEarlyMode,
+          privacyLevel,
+          roomType: 'ai',
+        },
+      );
+      addMessage({
+        id: `regen-${Date.now()}`,
+        role: 'ai',
+        text: refined,
+        timestamp: Date.now(),
+        type: 'normal',
+      });
+    } catch {
+      // Rollback: restore original message to input so user doesn't lose their text
+      setInputText(originalText);
+    } finally {
+      setIsToneRegenerating(false);
+    }
+  }, [interceptResult, addMessage, myProfile, trainingResult, isEarlyDatingMode, isRoomEarlyMode, privacyLevel]);
 
   const handleChangeText = useCallback((text: string) => {
     setInputText(text);
@@ -1364,6 +1794,15 @@ function ChatRoomView({
       />
       <CrisisMode visible={crisisVisible} partnerName={partnerName} onClose={() => setCrisisVisible(false)} />
 
+      {/* [Step #20] Sensitive Intercept Modal */}
+      <SensitiveInterceptModal
+        visible={interceptVisible}
+        intercept={interceptResult}
+        onForceSend={handleForceSend}
+        onRevise={handleCancelSend}
+        onToneRegenerate={handleToneRegenerate}
+      />
+
       {/* [Step #17] Gift Catalog Sheet */}
       <GiftCatalogSheet
         visible={giftSheetVisible}
@@ -1371,6 +1810,9 @@ function ChatRoomView({
         onSelect={handleSendGift}
         t={t}
       />
+
+      {/* [Step #21] Tone Regeneration Loading Overlay — rendered last to sit above all siblings */}
+      {isToneRegenerating && <ToneRegenerationLoadingOverlay />}
     </SafeAreaView>
   );
 }

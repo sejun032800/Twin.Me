@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   FadeIn,
@@ -22,26 +23,44 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeChatRhythm, parseKakaoExport } from '../../src/lib/kakaoParser';
 import { useAppContext } from '../../src/context/AppContext';
 import { TwinGradient } from '../../src/components/ui/TwinGradient';
 import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../src/styles/theme';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────────
 
 type Phase = 'idle' | 'picked' | 'parsing' | 'done' | 'error';
 
-// ─── Stage Labels ─────────────────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────────────────────
 
 const STAGE_LABELS = [
   '카카오톡 대화 데이터 분석 시작하는 중...',
-  '개인정보 보호를 위해 기기 내부에서 상대방 대화 파싱 중...',
+  '개인정보 보호를 위해 기기 내부에서 상대방 대화 파기 중...',
   '연인 사이의 시그니처 말투와 핵심 키워드 추출 중...',
   '분석 완료! 매칭 단계로 이동합니다.',
 ] as const;
+
+const MEDALS = ['🥇', '🥈', '🥉'] as const;
+
+const RANK_ACCENT = [Colors.GRADIENT_END, Colors.GRADIENT_MID, Colors.GRADIENT_START] as const;
+
+// Gradient border colors per rank
+const RANK_BORDERS: [string, string, string][] = [
+  ['#FF6B8B', '#D946EF', '#7C3AED'],
+  ['#D946EF', '#9333EA', '#4C1D95'],
+  ['#7C3AED', '#4C1D95', '#312E81'],
+];
+
+const CARD_GAP = 14;
+const SCROLL_H_PAD = 32; // matches s.scroll paddingHorizontal
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function pctToStage(pct: number): number {
   if (pct <= 30) return 0;
@@ -49,8 +68,6 @@ function pctToStage(pct: number): number {
   if (pct < 100) return 2;
   return 3;
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function deriveTagsFromDrips(drips: string[]): string[] {
   const joined = drips.join(' ');
@@ -68,60 +85,213 @@ function deriveTagsFromDrips(drips: string[]): string[] {
   return result.slice(0, 3);
 }
 
-// ─── Drip Card ────────────────────────────────────────────────────────────────
+// ─── DripCard ─────────────────────────────────────────────────────────────────
+// Glassmorphism card with neon gradient border
 
-const RANK_COLORS = [Colors.GRADIENT_END, Colors.GRADIENT_MID, Colors.GRADIENT_START];
-const MEDALS = ['🥇', '🥈', '🥉'];
-
-function DripCard({ drip, rank, delay }: { drip: string; rank: number; delay: number }) {
+function DripCard({ drip, rank, width }: { drip: string; rank: number; width: number }) {
   return (
-    <Animated.View
-      entering={FadeInDown.delay(delay).springify().damping(14).stiffness(120)}
-      style={dc.card}
+    <LinearGradient
+      colors={RANK_BORDERS[rank]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[dc.gradientBorder, { width }]}
     >
-      <Text style={dc.medal}>{MEDALS[rank]}</Text>
-      <View style={dc.content}>
-        <Text style={dc.rankLabel}>#{rank + 1} 시그니처</Text>
-        <Text style={[dc.drip, { color: RANK_COLORS[rank] }]}>{drip}</Text>
+      {/* Dark semi-transparent inner — simulates glassmorphism */}
+      <View style={dc.glass}>
+        {/* Top row: rank chip + medal */}
+        <View style={dc.topRow}>
+          <View style={[dc.rankChip, { borderColor: RANK_BORDERS[rank][0] + '55' }]}>
+            <Text style={[dc.rankChipText, { color: RANK_ACCENT[rank] }]}>
+              #{rank + 1} 시그니처 드립
+            </Text>
+          </View>
+          <Text style={dc.medal}>{MEDALS[rank]}</Text>
+        </View>
+
+        {/* Main drip display */}
+        <View style={dc.center}>
+          <Text
+            style={[dc.drip, { color: RANK_ACCENT[rank] }]}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+          >
+            "{drip}"
+          </Text>
+        </View>
+
+        {/* Divider line */}
+        <View style={[dc.divider, { backgroundColor: RANK_BORDERS[rank][0] + '33' }]} />
+
+        {/* Footer */}
+        <Text style={dc.hint}>우리 커플의 시그니처 표현</Text>
       </View>
-    </Animated.View>
+    </LinearGradient>
   );
 }
 
 const dc = StyleSheet.create({
-  card: {
+  gradientBorder: {
+    borderRadius: Radius['2xl'],
+    padding: 1.5,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 14,
+  },
+  glass: {
+    backgroundColor: 'rgba(10, 13, 26, 0.9)',
+    borderRadius: 22,
+    paddingVertical: Spacing['3xl'],
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.base,
+    minHeight: 230,
+    justifyContent: 'center',
+  },
+  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
-    backgroundColor: Colors.CARD_DARK_SLATE,
-    borderRadius: Radius.lg,
-    paddingVertical: Spacing.base,
-    paddingHorizontal: Spacing.base,
+    justifyContent: 'space-between',
+  },
+  rankChip: {
+    backgroundColor: 'rgba(124,58,237,0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    borderRadius: Radius.chip,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
   },
-  medal: { fontSize: 26, width: 36, textAlign: 'center' },
-  content: { flex: 1, gap: 2 },
-  rankLabel: {
-    color: Colors.TEXT_MUTED,
+  rankChipText: {
     fontSize: FontSize.xs,
-    fontWeight: FontWeight.semibold,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.5,
   },
+  medal: { fontSize: 26 },
+  center: { alignItems: 'center', paddingVertical: Spacing.sm },
   drip: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize['2xl'],
     fontWeight: FontWeight.extrabold,
     letterSpacing: -0.5,
+    textAlign: 'center',
+    lineHeight: 36,
+  },
+  divider: { height: 1, width: '100%' },
+  hint: {
+    color: Colors.TEXT_ON_DARK_SECONDARY,
+    fontSize: FontSize.xs,
+    textAlign: 'center',
+    letterSpacing: 0.4,
   },
 });
 
-// ─── Privacy Badge ─────────────────────────────────────────────────────────────
+// ─── DripCarousel ──────────────────────────────────────────────────────────────
+// Horizontal swipeable carousel with stagger FadeInUp entrance
+
+function DripCarousel({ drips }: { drips: string[] }) {
+  const { width: screenW } = useWindowDimensions();
+
+  // CARD_W: screen - left_pad - gap - right_peek
+  const PEEK_PX = 22;
+  const CARD_W = screenW - SCROLL_H_PAD - CARD_GAP - PEEK_PX;
+  const STEP = CARD_W + CARD_GAP;
+  const dripsLen = drips.length;
+  const minOffset = -(dripsLen - 1) * STEP;
+
+  const activeIdx = useSharedValue(0);  // worklet-safe index
+  const [activeIdxUI, setActiveIdxUI] = useState(0); // for dots render
+  const offsetX = useSharedValue(0);
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-12, 12])
+    .onUpdate((e) => {
+      const raw = -activeIdx.value * STEP + e.translationX;
+      // Rubber-band resistance at edges
+      if (raw > 0) {
+        offsetX.value = raw * 0.25;
+      } else if (raw < minOffset) {
+        offsetX.value = minOffset + (raw - minOffset) * 0.25;
+      } else {
+        offsetX.value = raw;
+      }
+    })
+    .onEnd((e) => {
+      const projected = offsetX.value + e.velocityX * 0.06;
+      const next = Math.max(0, Math.min(dripsLen - 1, Math.round(-projected / STEP)));
+      activeIdx.value = next;
+      offsetX.value = withSpring(-next * STEP, {
+        damping: 22,
+        stiffness: 220,
+        mass: 0.8,
+      });
+      runOnJS(setActiveIdxUI)(next);
+    });
+
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offsetX.value }],
+  }));
+
+  return (
+    <View style={car.wrapper}>
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[car.row, { paddingLeft: SCROLL_H_PAD }, rowStyle]}>
+          {drips.map((drip, i) => (
+            // Each card stagger-slides up from below
+            <Animated.View
+              key={`drip-${i}`}
+              entering={
+                FadeInUp
+                  .delay(i * 200)
+                  .duration(500)
+                  .springify()
+                  .damping(14)
+                  .stiffness(110)
+              }
+            >
+              <DripCard drip={drip} rank={i} width={CARD_W} />
+            </Animated.View>
+          ))}
+        </Animated.View>
+      </GestureDetector>
+
+      {/* Page indicator dots */}
+      <Animated.View entering={FadeIn.delay(750).duration(400)} style={car.dots}>
+        {drips.map((_, i) => (
+          <View
+            key={i}
+            style={[car.dot, i === activeIdxUI && car.dotActive]}
+          />
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+const car = StyleSheet.create({
+  wrapper: { width: '100%' },
+  row: {
+    flexDirection: 'row',
+    gap: CARD_GAP,
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: Spacing.base,
+  },
+  dot: {
+    height: 6,
+    width: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  dotActive: {
+    width: 22,
+    backgroundColor: Colors.GRADIENT_END,
+  },
+});
+
+// ─── PrivacyBadge ─────────────────────────────────────────────────────────────
 
 function PrivacyBadge() {
   return (
@@ -160,12 +330,7 @@ const pv = StyleSheet.create({
 
 export default function IngestionScreen() {
   const router = useRouter();
-  const {
-    myProfile,
-    setTrainingResult,
-    setChatStyleProfile,
-    setRawKakaoText,
-  } = useAppContext();
+  const { myProfile, setTrainingResult, setChatStyleProfile, setRawKakaoText } = useAppContext();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [fileName, setFileName] = useState('');
@@ -185,8 +350,7 @@ export default function IngestionScreen() {
     width: `${Math.round(progress.value * 100)}%` as `${number}%`,
   }));
 
-  // ─── Progress Stage & Percentage Sync ──────────────────────────────────────
-
+  // Sync progress pct + stage label
   useAnimatedReaction(
     () => Math.round(progress.value * 100),
     (pct, prevPct) => {
@@ -200,22 +364,19 @@ export default function IngestionScreen() {
     },
   );
 
-  // ─── File Picker ───────────────────────────────────────────────────────────
+  // ─── File Picker ─────────────────────────────────────────────────────────
 
   const handlePickFile = async () => {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
         copyToCacheDirectory: true,
       });
-
       if (result.canceled) return;
 
       const asset = result.assets[0];
       const name = asset.name ?? 'kakao_export.txt';
-
       let content: string;
 
       if (Platform.OS === 'web') {
@@ -243,7 +404,7 @@ export default function IngestionScreen() {
     }
   };
 
-  // ─── Parse Trigger ─────────────────────────────────────────────────────────
+  // ─── Parse Trigger ────────────────────────────────────────────────────────
 
   const onAnimationDone = useCallback(() => {
     setDrips(pendingDripsRef.current);
@@ -256,7 +417,6 @@ export default function IngestionScreen() {
     if (!rawTextRef.current) return;
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
 
-    // Reset progress state before starting
     setProgressPct(0);
     setProgressLabel(STAGE_LABELS[0]);
     setPhase('parsing');
@@ -287,20 +447,19 @@ export default function IngestionScreen() {
       pendingDripsRef.current = extractedDrips;
       pendingLineCountRef.current = parsed.myLines.length;
     } catch {
-      // Stop gauge immediately and show error overlay
       cancelAnimation(progress);
       setErrorMsg('파싱 중 오류가 발생했어요. 올바른 카카오톡 내보내기 파일인지 확인해주세요.');
       setPhase('error');
       return;
     }
 
-    // Animate 0 → 100% over 2.8s, then show drip cards
+    // Gauge 0 → 100% over 2.8s, then reveal drip cards
     progress.value = withTiming(1, { duration: 2800 }, (finished) => {
       if (finished) runOnJS(onAnimationDone)();
     });
   };
 
-  // ─── Navigation ────────────────────────────────────────────────────────────
+  // ─── Navigation ──────────────────────────────────────────────────────────
 
   const handleNext = async () => {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
@@ -326,7 +485,7 @@ export default function IngestionScreen() {
     setTrackWidth(e.nativeEvent.layout.width);
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={s.container}>
@@ -335,11 +494,10 @@ export default function IngestionScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         bounces={false}
-        // Disable scroll during parsing to prevent accidental interaction
         scrollEnabled={phase !== 'parsing'}
       >
 
-        {/* ── IDLE / PICKED Phase ── */}
+        {/* ══ IDLE / PICKED ══════════════════════════════════════════════════ */}
         {(phase === 'idle' || phase === 'picked') && (
           <>
             <Animated.View entering={FadeInDown.duration(500)} style={s.headerBlock}>
@@ -350,7 +508,6 @@ export default function IngestionScreen() {
               </Text>
             </Animated.View>
 
-            {/* Upload Zone */}
             <Animated.View entering={FadeInDown.delay(150).duration(500)}>
               <Pressable
                 style={[s.uploadZone, phase === 'picked' && s.uploadZonePicked]}
@@ -369,7 +526,6 @@ export default function IngestionScreen() {
               </Pressable>
             </Animated.View>
 
-            {/* CTA Button */}
             <Animated.View entering={FadeInDown.delay(280).duration(500)}>
               {phase === 'idle' ? (
                 <Pressable onPress={handlePickFile}>
@@ -386,19 +542,17 @@ export default function IngestionScreen() {
               )}
             </Animated.View>
 
-            {/* Privacy Badge */}
             <Animated.View entering={FadeInDown.delay(380).duration(500)}>
               <PrivacyBadge />
             </Animated.View>
 
-            {/* How-to Guide */}
             <Animated.View entering={FadeInDown.delay(460).duration(500)} style={s.guideCard}>
               <Text style={s.guideTitle}>📖 파일 내보내기 방법</Text>
               <View style={s.guideSteps}>
                 {[
                   '카카오톡 앱 → 대화방 입장',
                   '오른쪽 상단 ☰ → 채팅방 설정',
-                  '\'대화 내용 내보내기\' → 텍스트(.txt) 선택',
+                  "'대화 내용 내보내기' → 텍스트(.txt) 선택",
                   '내보낸 파일을 여기서 업로드',
                 ].map((step, i) => (
                   <View key={i} style={s.guideStep}>
@@ -411,37 +565,50 @@ export default function IngestionScreen() {
           </>
         )}
 
-        {/* ── DONE Phase ── */}
+        {/* ══ DONE ═══════════════════════════════════════════════════════════ */}
         {phase === 'done' && (
           <>
-            <Animated.View entering={FadeInDown.duration(500)} style={s.doneHeader}>
+            {/* Header */}
+            <Animated.View entering={FadeInDown.duration(450)} style={s.doneHeader}>
               <View style={s.completeBadge}>
                 <Text style={s.completeBadgeText}>✦ 말투 분석 완료 ✦</Text>
               </View>
               <Text style={s.doneTitle}>시그니처를 발견했어요! ✨</Text>
               {lineCount > 0 && (
-                <Text style={s.doneStats}>{lineCount.toLocaleString()}개 대사 분석 완료</Text>
+                <Text style={s.doneStats}>
+                  {lineCount.toLocaleString()}개 대사 분석 완료
+                </Text>
               )}
             </Animated.View>
 
-            {/* TOP 3 Drip Cards */}
-            <View style={s.dripsBlock}>
-              {drips.map((drip, i) => (
-                <DripCard key={`${drip}-${i}`} drip={drip} rank={i} delay={i * 160} />
-              ))}
+            {/* Carousel — breaks out of scroll padding for full-width display */}
+            <View style={s.carouselBreakout}>
+              <DripCarousel drips={drips} />
             </View>
 
-            <Animated.View entering={FadeInUp.delay(600).duration(500)}>
+            {/* Swipe hint */}
+            <Animated.View entering={FadeIn.delay(800).duration(400)} style={s.swipeHint}>
+              <Text style={s.swipeHintText}>← 좌우로 넘겨서 확인하세요 →</Text>
+            </Animated.View>
+
+            {/* CTA */}
+            <Animated.View
+              entering={FadeInUp.delay(700).duration(500)}
+              style={s.doneCTABlock}
+            >
               <Pressable onPress={handleNext}>
                 <TwinGradient preset="TWIN_PRIMARY" style={s.ctaButton}>
-                  <Text style={s.ctaText}>다음 단계로 →</Text>
+                  <Text style={s.ctaText}>우리 초대코드 만들러 가기 →</Text>
                 </TwinGradient>
+              </Pressable>
+              <Pressable onPress={handleSkip} style={s.skipRow}>
+                <Text style={s.skipText}>나중에 하기</Text>
               </Pressable>
             </Animated.View>
           </>
         )}
 
-        {/* ── ERROR Phase ── */}
+        {/* ══ ERROR ══════════════════════════════════════════════════════════ */}
         {phase === 'error' && (
           <Animated.View entering={FadeIn.duration(400)} style={s.errorBlock}>
             <Text style={s.errorIcon}>⚠️</Text>
@@ -456,7 +623,7 @@ export default function IngestionScreen() {
           </Animated.View>
         )}
 
-        {/* Skip link — only on idle */}
+        {/* Skip — idle only */}
         {phase === 'idle' && (
           <Animated.View entering={FadeInUp.delay(560).duration(400)} style={s.skipRow}>
             <Pressable onPress={handleSkip}>
@@ -465,22 +632,25 @@ export default function IngestionScreen() {
           </Animated.View>
         )}
 
-        {/* Step Dots */}
+        {/* Step dots */}
         <View style={s.stepRow}>
           {[1, 2, 3, 4].map((i) => (
             <View
               key={i}
               style={[
                 s.stepDot,
-                phase === 'done' ? s.stepDotDone : i === 1 ? s.stepDotActive : s.stepDotInactive,
+                phase === 'done'
+                  ? s.stepDotDone
+                  : i === 1
+                  ? s.stepDotActive
+                  : s.stepDotInactive,
               ]}
             />
           ))}
         </View>
       </ScrollView>
 
-      {/* ── Glassmorphism Parsing Overlay ──────────────────────────────────────── */}
-      {/* Absolutely positioned over the entire SafeAreaView — prevents all taps */}
+      {/* ══ PARSING OVERLAY (absoluteFill glassmorphism) ═══════════════════════ */}
       {phase === 'parsing' && (
         <Animated.View
           entering={FadeIn.duration(300)}
@@ -488,10 +658,7 @@ export default function IngestionScreen() {
           pointerEvents="box-only"
         >
           <View style={s.glassCard}>
-            {/* Icon pulse */}
             <Text style={s.parsingIcon}>🧬</Text>
-
-            {/* Stage label — changes at progress thresholds */}
             <Text style={s.parsingTitle}>말투 분석 중...</Text>
             <Text style={s.stageLabel}>{progressLabel}</Text>
 
@@ -509,12 +676,12 @@ export default function IngestionScreen() {
               </Animated.View>
             </View>
 
-            {/* Percentage readout */}
             <Text style={s.pctLabel}>{progressPct}%</Text>
 
-            {/* Privacy lock badge */}
             <View style={s.lockBadge}>
-              <Text style={s.lockText}>🔒  On-Device Processing · End-to-End Encrypted</Text>
+              <Text style={s.lockText}>
+                🔒  On-Device Processing · End-to-End Encrypted
+              </Text>
             </View>
           </View>
         </Animated.View>
@@ -523,12 +690,12 @@ export default function IngestionScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.BG_DARK_MIDNIGHT },
   scroll: {
-    paddingHorizontal: Spacing['2xl'],
+    paddingHorizontal: SCROLL_H_PAD,
     paddingTop: Spacing.xl,
     paddingBottom: Spacing['4xl'],
     gap: Spacing.lg,
@@ -632,7 +799,7 @@ const s = StyleSheet.create({
     flex: 1,
   },
 
-  // Done
+  // Done phase
   doneHeader: { alignItems: 'center', gap: Spacing.sm },
   completeBadge: {
     backgroundColor: 'rgba(167,139,250,0.15)',
@@ -660,7 +827,22 @@ const s = StyleSheet.create({
     fontSize: FontSize.xs,
     textAlign: 'center',
   },
-  dripsBlock: { gap: Spacing.md },
+
+  // Carousel breaks out of the 32px scroll padding for full-width display
+  carouselBreakout: {
+    marginHorizontal: -SCROLL_H_PAD,
+  },
+
+  // Swipe hint below carousel
+  swipeHint: { alignItems: 'center' },
+  swipeHintText: {
+    color: Colors.TEXT_MUTED,
+    fontSize: FontSize.xs,
+    letterSpacing: 0.4,
+  },
+
+  // Done CTA block
+  doneCTABlock: { gap: Spacing.sm },
 
   // Error
   errorBlock: {
@@ -709,7 +891,7 @@ const s = StyleSheet.create({
     paddingVertical: 4,
   },
 
-  // Step Dots
+  // Step dots
   stepRow: {
     flexDirection: 'row',
     gap: 8,
@@ -721,10 +903,8 @@ const s = StyleSheet.create({
   stepDotDone: { width: 6, backgroundColor: Colors.GRADIENT_MID },
   stepDotInactive: { width: 6, backgroundColor: 'rgba(255,255,255,0.18)' },
 
-  // ── Glassmorphism Parsing Overlay ─────────────────────────────────────────
-
+  // Parsing overlay (glassmorphism)
   overlayRoot: {
-    // rgba dark dimmer — simulates glassmorphism backdrop without expo-blur
     backgroundColor: 'rgba(10, 13, 26, 0.88)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -740,17 +920,13 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing['2xl'],
     alignItems: 'center',
     gap: Spacing.base,
-    // Subtle violet glow
     shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.35,
     shadowRadius: 24,
     elevation: 16,
   },
-  parsingIcon: {
-    fontSize: 52,
-    marginBottom: Spacing.sm,
-  },
+  parsingIcon: { fontSize: 52, marginBottom: Spacing.sm },
   parsingTitle: {
     color: Colors.TEXT_ON_DARK,
     fontSize: FontSize.lg,
@@ -765,8 +941,6 @@ const s = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: Spacing.sm,
   },
-
-  // Gradient progress bar
   barTrack: {
     width: '100%',
     height: 10,
@@ -779,14 +953,12 @@ const s = StyleSheet.create({
     height: '100%',
     borderRadius: Radius.pill,
     overflow: 'hidden',
-    // Neon glow on the fill bar
     shadowColor: '#D946EF',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 8,
     elevation: 8,
   },
-
   pctLabel: {
     color: Colors.GRADIENT_MID,
     fontSize: FontSize.sm,
@@ -794,7 +966,6 @@ const s = StyleSheet.create({
     letterSpacing: 1,
     marginTop: -Spacing.xs,
   },
-
   lockBadge: {
     paddingVertical: 7,
     paddingHorizontal: Spacing.base,

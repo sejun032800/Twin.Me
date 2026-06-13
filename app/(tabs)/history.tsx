@@ -1343,10 +1343,18 @@ const museS = StyleSheet.create({
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
-  const { dateCourses, partnerProfile, bulkAddDateCourses, privacyLevel } = useAppContext();
+  const { dateCourses, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse } = useAppContext();
   const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
   const { pickPhoto } = usePhotoMetadata();
   const [addVisible, setAddVisible]           = useState(false);
+
+  // Open AddCourseSheet when triggered from home tab [+추가] button
+  useEffect(() => {
+    if (triggerAddCourse) {
+      setAddVisible(true);
+      setTriggerAddCourse(false);
+    }
+  }, [triggerAddCourse, setTriggerAddCourse]);
   const [museVisible, setMuseVisible]         = useState(false);
   const [selectedCourse, setSelectedCourse]   = useState<DateCourse | null>(null);
   const [recommendations, setRecommendations] = useState<RecommendedPlace[] | null>(null);

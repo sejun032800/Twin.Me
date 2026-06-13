@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -24,12 +26,20 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { maskPII, useAppContext } from '../../src/context/AppContext';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
+import { requestSelfAiLlmResponse, type ChatHistoryItem } from '../../src/services/selfAiService';
 import { useChatStream, ChatStreamReturn, ToneAlert } from '../../src/hooks/useChatStream';
 import { WeeklyReportModal, ReportCardBubble } from '../../src/components/chat/WeeklyReportModal';
+import {
+  initChatroomRealtimeSocket,
+  uploadMediaFile,
+  RealtimeIncomingMessage,
+} from '../../src/services/realtimeService';
 import {
   Colors,
   FontSize,
@@ -44,10 +54,17 @@ import {
 
 type RoomType = 'partner' | 'ai' | 'analyst';
 type MessageRole = 'user' | 'ai';
-type MessageType = 'normal' | 'nudge' | 'report_card';
+type MessageType = 'normal' | 'nudge' | 'report_card' | 'image' | 'video' | 'location' | 'gift';
 type ToneFeedback = 'too_warm' | 'too_cold' | 'no_humor';
 
 interface ToneWeight { warmth: number; humor: number }
+
+interface GiftItem {
+  id: string;
+  name: string;
+  emoji: string;
+  price: string;
+}
 
 interface Message {
   id: string;
@@ -55,7 +72,27 @@ interface Message {
   text: string;
   timestamp: number;
   type: MessageType;
+  // Media (image / video)
+  mediaUri?: string;
+  // Location
+  latitude?: number;
+  longitude?: number;
+  // Gift
+  giftName?: string;
+  giftEmoji?: string;
+  giftPrice?: string;
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const GIFT_CATALOG: GiftItem[] = [
+  { id: 'coffee', name: '아이스 아메리카노', emoji: '☕', price: '4,500원' },
+  { id: 'flower', name: '꽃다발', emoji: '💐', price: '29,000원' },
+  { id: 'cake', name: '케이크', emoji: '🎂', price: '45,000원' },
+  { id: 'teddy', name: '테디베어', emoji: '🧸', price: '35,000원' },
+  { id: 'cinema', name: '영화 티켓', emoji: '🎬', price: '14,000원' },
+  { id: 'ring', name: '커플링', emoji: '💍', price: '150,000원' },
+];
 
 // ─── Crisis detection (FUN-CHA-003) ──────────────────────────────────────────
 
@@ -119,52 +156,21 @@ function calcBubbleDelay(text: string, profile: ChatStyleProfile): number {
   return Math.min(text.length * profile.typingSpeedFactor + profile.burstInterval * 0.5, 3500);
 }
 
-// ─── Mock AI replies ──────────────────────────────────────────────────────────
+// ─── Early Dating Mode — Prompt System (Step #16) ────────────────────────────
 
-const REPLIES_WARM = [
-  '응~ 나도 생각하고 있었어. 오늘 어떻게 지냈어?',
-  '맞아 정말 그렇지. 나 진짜 요즘 너 보고 싶었는데.',
-  '아 진짜? 나 그 얘기 들으니까 마음이 좀 놓이네. 다행이다.',
-  '너 그럴 때 진짜 귀여워 알지?',
-  '오늘 같이 있었으면 좋았을 텐데. 다음엔 꼭 같이 가자.',
-];
-const REPLIES_NEUTRAL = [
-  '그거 진짜야? 나도 비슷한 거 느꼈어.',
-  '헉 그랬어? 힘들었겠다. 고생했어.',
-  '아, 그렇구나. 그 부분에 대해 좀 더 얘기해줘.',
-  '음… 어떻게 됐어? 결국에는?',
-  '그래. 나도 그 부분은 좀 생각해봐야겠다.',
-];
-const REPLIES_FORMAL = [
-  '그 상황이 어떻게 전개됐는지 좀 더 설명해 줄 수 있어?',
-  '맞아. 그 판단은 타당하다고 생각해.',
-  '그 건에 대해서는 시간을 두고 생각해보는 게 좋겠어.',
-  '알겠어. 내가 그 부분을 놓쳤네.',
-];
-const REPLIES_FUNNY = [
-  '그거 진짜야? 역시 우리 통하나봐 ㅎㅎ',
-  'ㅋㅋㅋ 아 그거 너무 웃기다. 진짜 그 사람 왜 그래?',
-  '아 ㅋㅋ 맞아 나 그때 진짜 참았잖아. 지금 생각해도 웃겨.',
-  '헐 진짜?? ㅋㅋㅋ 그 말을 진짜 한 거야?',
-];
-const ANALYST_REPLIES = [
-  '최근 대화 패턴 분석 결과, 두 분의 공감 지수가 87%로 상당히 높게 측정됩니다. 좋은 신호예요! 🎯',
-  '오늘 대화에서 상대방의 감정 온도가 약간 낮게 감지됩니다. 따뜻한 한마디가 효과적일 것 같아요.',
-  '커플 갈등 예방 팁: 하루 한 번, 오늘 있었던 작은 행복을 공유해보세요.',
-  '이번 주 두 분의 대화 감성 스코어: 긍정 78% / 중립 18% / 부정 4%. 매우 건강한 상태입니다! ✨',
-];
+const EARLY_DATING_SYSTEM_MODIFIER =
+  '[SYSTEM_MODIFIER: EARLY_DATING_MODE = TRUE. 상대방에게 답변을 제안하거나 코칭할 때, ' +
+  '아직은 서로 조심스럽고 설레는 문체, 예의를 지키되 위트 있는 톤앤매너를 유지할 것]';
 
-function mockAIReplyWithWeight(_: string[], room: RoomType, w: ToneWeight): string {
-  if (room === 'analyst') return ANALYST_REPLIES[Math.floor(Math.random() * ANALYST_REPLIES.length)];
-  if (w.humor > 1) return REPLIES_FUNNY[Math.floor(Math.random() * REPLIES_FUNNY.length)];
-  if (w.warmth < -1) return REPLIES_FORMAL[Math.floor(Math.random() * REPLIES_FORMAL.length)];
-  if (w.warmth > 1) return REPLIES_WARM[Math.floor(Math.random() * REPLIES_WARM.length)];
-  return REPLIES_NEUTRAL[Math.floor(Math.random() * REPLIES_NEUTRAL.length)];
+export function buildSystemModifier(isEarlyDatingMode: boolean): string {
+  return isEarlyDatingMode ? EARLY_DATING_SYSTEM_MODIFIER : '';
 }
+
+// ─── (Step #18) Mock reply arrays removed — replaced by requestSelfAiLlmResponse ──
 
 // ─── Typing Indicator ─────────────────────────────────────────────────────────
 
-function TypingIndicator({ partnerName, t }: { partnerName: string; t: ThemeTokens }) {
+function TypingIndicator({ partnerName, t, isAnalyzing }: { partnerName: string; t: ThemeTokens; isAnalyzing?: boolean }) {
   const d1 = useSharedValue(0);
   const d2 = useSharedValue(0);
   const d3 = useSharedValue(0);
@@ -184,13 +190,87 @@ function TypingIndicator({ partnerName, t }: { partnerName: string; t: ThemeToke
   const s3 = useAnimatedStyle(() => ({ transform: [{ translateY: d3.value }] }));
   return (
     <View style={styles.typingWrapper}>
-      <Text style={[styles.typingLabel, { color: t.textMuted }]}>{partnerName} AI가 말하는 중...</Text>
+      <Text style={[styles.typingLabel, { color: t.textMuted }]}>
+          {isAnalyzing ? '트윈이가 내 생각을 분석 중이에요... 🔮' : `${partnerName} AI가 말하는 중...`}
+        </Text>
       <View style={[styles.typingBubble, { backgroundColor: t.bubbleAI, borderColor: t.isLight ? 'rgba(180,140,200,0.3)' : '#4C2B8A' }]}>
         <Animated.View style={[styles.dot, s1]} />
         <Animated.View style={[styles.dot, s2]} />
         <Animated.View style={[styles.dot, s3]} />
       </View>
     </View>
+  );
+}
+
+// ─── Early Mode Toggle (Step #16) ────────────────────────────────────────────
+
+function EarlyModeToggle({
+  value, onChange, label, t,
+}: { value: boolean; onChange: (v: boolean) => void; label?: string; t: ThemeTokens }) {
+  const progress = useSharedValue(value ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withSpring(value ? 1 : 0, { damping: 18, stiffness: 320 });
+  }, [value, progress]);
+
+  const knobAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(progress.value, [0, 1], [2, 16]) }],
+  }));
+  // Track fill gradient
+  const gradientOpacity = useAnimatedStyle(() => ({ opacity: progress.value }));
+  // Border ring gradient (appears when active)
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: interpolate(progress.value, [0, 1], [0.85, 1]) }],
+  }));
+  // Outer shadow glow (stronger than Step #16 version)
+  const glowStyle = useAnimatedStyle(() => ({
+    shadowOpacity: interpolate(progress.value, [0, 1], [0, 0.85]),
+    shadowRadius: interpolate(progress.value, [0, 1], [0, 12]),
+    elevation: interpolate(progress.value, [0, 1], [0, 8]),
+  }));
+
+  const handleToggle = () => {
+    const next = !value;
+    Haptics.impactAsync(next ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
+    onChange(next);
+  };
+
+  return (
+    <Pressable onPress={handleToggle} style={styles.earlyToggleWrap}>
+      {label != null && (
+        <Text style={[styles.earlyToggleLabel, { color: value ? Colors.GRADIENT_END : t.textMuted }]}>
+          {label}
+        </Text>
+      )}
+      {/* Glow container — shadow spreads from here */}
+      <Animated.View style={[styles.earlyToggleOuter, glowStyle, { shadowColor: Colors.GRADIENT_MID }]}>
+        {/* Gradient border ring — fades in when toggle is On */}
+        <Animated.View style={[StyleSheet.absoluteFill, styles.earlyToggleRing, ringStyle]}>
+          <LinearGradient
+            colors={[Colors.GRADIENT_START, Colors.GRADIENT_MID, Colors.GRADIENT_END]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={{ flex: 1, borderRadius: 12 }}
+          />
+        </Animated.View>
+        {/* Track — inset by 1.5px to reveal gradient border ring when active */}
+        <View style={[
+          styles.earlyToggleTrack,
+          { backgroundColor: t.isLight ? '#CBD5E1' : '#334155', margin: value ? 1.5 : 0 },
+        ]}>
+          {/* Gradient fill background */}
+          <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 10 }, gradientOpacity]}>
+            <LinearGradient
+              colors={[Colors.GRADIENT_START, Colors.GRADIENT_END]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={{ flex: 1, borderRadius: 10 }}
+            />
+          </Animated.View>
+          {/* Knob */}
+          <Animated.View style={[styles.earlyToggleKnob, knobAnimStyle]} />
+        </View>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -214,7 +294,7 @@ function ProfileHUD({ profile, t }: { profile: ChatStyleProfile; t: ThemeTokens 
   );
 }
 
-// ─── [NEW] Sensitive Warning Banner ───────────────────────────────────────────
+// ─── Sensitive Warning Banner ─────────────────────────────────────────────────
 
 function SensitiveWarningBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
   const translateY = useSharedValue(-56);
@@ -241,7 +321,7 @@ function SensitiveWarningBanner({ message, onDismiss }: { message: string; onDis
   );
 }
 
-// ─── [NEW] Tone Guide Popup (Drop-in for AI room) ─────────────────────────────
+// ─── Tone Guide Popup (Drop-in for AI room) ───────────────────────────────────
 
 function ToneGuidePopup({
   alert, onDismiss,
@@ -282,25 +362,254 @@ function ToneGuidePopup({
   );
 }
 
-// ─── [NEW] Attachment Bar (partner room) ─────────────────────────────────────
+// ─── [Step #17] Media Bubble (image / video with upload progress) ─────────────
 
-function AttachmentBar({ partnerName }: { partnerName: string }) {
-  const toast = (label: string) => Alert.alert(`${label} 첨부`, `${partnerName}님께 ${label}을 보내는 기능은 정식 출시 버전에서 제공됩니다.`);
+function MediaBubble({
+  message, uploadProgress,
+}: { message: Message; uploadProgress?: number }) {
+  const isUser = message.role === 'user';
+  const isUploading = uploadProgress !== undefined && uploadProgress < 100;
+
+  return (
+    <View style={[styles.mediaBubble, isUser ? styles.mediaBubbleUser : styles.mediaBubbleAI]}>
+      {message.type === 'image' && message.mediaUri ? (
+        <Image source={{ uri: message.mediaUri }} style={styles.mediaImage} resizeMode="cover" />
+      ) : (
+        <View style={styles.videoPlaceholder}>
+          <LinearGradient
+            colors={['rgba(124,58,237,0.3)', 'rgba(217,70,239,0.2)']}
+            style={StyleSheet.absoluteFill}
+          />
+          <Text style={styles.videoPlaceholderIcon}>🎬</Text>
+          <Text style={styles.videoPlaceholderText}>동영상</Text>
+        </View>
+      )}
+      {isUploading && (
+        <View style={styles.uploadOverlay}>
+          <View style={styles.uploadProgressTrack}>
+            <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` as any }]} />
+          </View>
+          <Text style={styles.uploadProgressText}>{uploadProgress}%</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── [Step #17] Location Bubble ───────────────────────────────────────────────
+
+function LocationBubble({
+  latitude, longitude, role,
+}: { latitude: number; longitude: number; role: MessageRole }) {
+  const isUser = role === 'user';
+  const lat = latitude.toFixed(5);
+  const lng = longitude.toFixed(5);
+
+  const handleOpenMap = async () => {
+    const label = encodeURIComponent('현재 위치');
+    const nativeUrl = Platform.OS === 'ios'
+      ? `maps://maps.apple.com/?ll=${latitude},${longitude}&q=${label}`
+      : `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
+    const webUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+    try {
+      const canOpen = await Linking.canOpenURL(nativeUrl);
+      await Linking.openURL(canOpen ? nativeUrl : webUrl);
+    } catch {
+      try { await Linking.openURL(webUrl); } catch {
+        Alert.alert('지도 열기 실패', '기기에서 지도 앱을 열 수 없습니다.');
+      }
+    }
+  };
+
+  return (
+    <View style={[styles.locationCard, isUser ? styles.locationCardUser : styles.locationCardAI]}>
+      <LinearGradient
+        colors={['rgba(124,58,237,0.18)', 'rgba(217,70,239,0.12)', 'rgba(255,107,139,0.08)']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.locationGradBg}
+      >
+        {/* Mini map mock */}
+        <View style={styles.locationMapMock}>
+          <View style={styles.locationGridWrap}>
+            {Array.from({ length: 16 }).map((_, i) => (
+              <View key={i} style={styles.locationGridDot} />
+            ))}
+          </View>
+          <View style={styles.locationPinWrap}>
+            <Text style={styles.locationMapPin}>📍</Text>
+          </View>
+        </View>
+        <View style={styles.locationInfo}>
+          <Text style={styles.locationLabel}>현재 위치 공유</Text>
+          <Text style={styles.locationCoords}>{lat}°N, {lng}°E</Text>
+          <TouchableOpacity style={styles.locationOpenBtn} onPress={handleOpenMap} activeOpacity={0.75}>
+            <Text style={styles.locationOpenText}>지도에서 보기 →</Text>
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+// ─── [Step #17] Gift Bubble ───────────────────────────────────────────────────
+
+function GiftBubble({
+  giftName, giftEmoji, giftPrice, role, senderName,
+}: {
+  giftName: string; giftEmoji: string; giftPrice: string;
+  role: MessageRole; senderName: string;
+}) {
+  const isUser = role === 'user';
+  const glowOpacity = useSharedValue(0.55);
+
+  useEffect(() => {
+    glowOpacity.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 900 }),
+        withTiming(0.55, { duration: 900 }),
+      ), -1, false,
+    );
+  }, [glowOpacity]);
+
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
+
+  return (
+    <View style={[styles.giftBubbleWrap, isUser ? styles.giftBubbleWrapUser : styles.giftBubbleWrapAI]}>
+      <LinearGradient
+        colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.giftBubbleGradBorder}
+      >
+        <View style={styles.giftBubbleInner}>
+          <Animated.View
+            style={[StyleSheet.absoluteFill, styles.giftBubbleGlow, glowStyle]}
+          />
+          <Text style={styles.giftBubbleEmoji}>{giftEmoji}</Text>
+          <Text style={styles.giftBubbleTitle}>
+            {isUser ? '나' : senderName}님이 선물을 보냈어요 💝
+          </Text>
+          <Text style={styles.giftBubbleName}>{giftName}</Text>
+          <Text style={styles.giftBubblePrice}>{giftPrice}</Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+// ─── [Step #17] Gift Catalog Sheet ───────────────────────────────────────────
+
+function GiftCatalogSheet({
+  visible, onClose, onSelect, t,
+}: {
+  visible: boolean; onClose: () => void;
+  onSelect: (gift: GiftItem) => void; t: ThemeTokens;
+}) {
+  const translateY = useSharedValue(500);
+  const dimOpacity = useSharedValue(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      setSelectedId(null);
+      dimOpacity.value = withTiming(1, { duration: 250 });
+      translateY.value = withSpring(0, { damping: 22, stiffness: 210 });
+    } else {
+      dimOpacity.value = withTiming(0, { duration: 200 });
+      translateY.value = withTiming(500, { duration: 240 });
+    }
+  }, [visible, translateY, dimOpacity]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  const dimStyle = useAnimatedStyle(() => ({ opacity: dimOpacity.value }));
+  if (!visible) return null;
+
+  const selectedGift = GIFT_CATALOG.find((g) => g.id === selectedId) ?? null;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <Animated.View style={[styles.dim, dimStyle]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+      <Animated.View style={[styles.giftSheet, { backgroundColor: t.card, borderColor: t.divider }, sheetStyle]}>
+        <View style={styles.sheetHandle} />
+        <Text style={[styles.giftSheetTitle, { color: t.text }]}>🎁 선물 카탈로그</Text>
+        <Text style={[styles.giftSheetSubtitle, { color: t.textMuted }]}>특별한 선물로 마음을 전해보세요 💝</Text>
+        <View style={styles.giftGrid}>
+          {GIFT_CATALOG.map((gift) => {
+            const isActive = selectedId === gift.id;
+            return (
+              <TouchableOpacity
+                key={gift.id}
+                style={[
+                  styles.giftGridItem,
+                  {
+                    backgroundColor: isActive ? 'rgba(255,107,139,0.12)' : t.inputBg,
+                    borderColor: isActive ? Colors.GRADIENT_END : t.divider,
+                    borderWidth: isActive ? 1.5 : 1,
+                  },
+                ]}
+                onPress={() => {
+                  setSelectedId(gift.id);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.giftGridEmoji}>{gift.emoji}</Text>
+                <Text style={[styles.giftGridName, { color: t.text }]} numberOfLines={1}>{gift.name}</Text>
+                <Text style={[styles.giftGridPrice, { color: t.textMuted }]}>{gift.price}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TouchableOpacity
+          style={[styles.giftSendBtn, { opacity: selectedGift ? 1 : 0.4 }]}
+          disabled={!selectedGift}
+          onPress={() => { if (selectedGift) onSelect(selectedGift); }}
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={[Colors.GRADIENT_START, Colors.GRADIENT_MID, Colors.GRADIENT_END]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={styles.giftSendBtnGrad}
+          >
+            <Text style={styles.giftSendBtnText}>
+              {selectedGift ? `💝 ${selectedGift.name} 선물 보내기` : '선물을 선택해주세요'}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.sheetCloseBtn} onPress={onClose}>
+          <Text style={[styles.sheetCloseBtnText, { color: t.textMuted }]}>닫기</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── [Step #17] Updated Attachment Bar ───────────────────────────────────────
+
+interface AttachmentBarHandlers {
+  onPickImage: () => void;
+  onPickVideo: () => void;
+  onShareLocation: () => void;
+  onOpenGiftCatalog: () => void;
+}
+
+function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCatalog }: AttachmentBarHandlers) {
   return (
     <View style={styles.attachBar}>
-      <Pressable style={styles.attachBtn} onPress={() => toast('사진')}>
+      <Pressable style={styles.attachBtn} onPress={onPickImage}>
         <Text style={styles.attachBtnIcon}>📷</Text>
         <Text style={styles.attachBtnLabel}>갤러리</Text>
       </Pressable>
-      <Pressable style={styles.attachBtn} onPress={() => toast('영상')}>
+      <Pressable style={styles.attachBtn} onPress={onPickVideo}>
         <Text style={styles.attachBtnIcon}>🎬</Text>
         <Text style={styles.attachBtnLabel}>동영상</Text>
       </Pressable>
-      <Pressable style={styles.attachBtn} onPress={() => toast('위치')}>
+      <Pressable style={styles.attachBtn} onPress={onShareLocation}>
         <Text style={styles.attachBtnIcon}>📍</Text>
         <Text style={styles.attachBtnLabel}>위치 공유</Text>
       </Pressable>
-      <Pressable style={styles.attachBtn} onPress={() => toast('선물')}>
+      <Pressable style={styles.attachBtn} onPress={onOpenGiftCatalog}>
         <Text style={styles.attachBtnIcon}>🎁</Text>
         <Text style={styles.attachBtnLabel}>선물</Text>
       </Pressable>
@@ -351,13 +660,27 @@ function ToneFeedbackSheet({
           {TONE_OPTIONS.map((opt) => {
             const isActive = selected === opt.id;
             return (
-              <TouchableOpacity key={opt.id} style={[styles.feedbackChip, { backgroundColor: isActive ? `${Colors.GRADIENT_START}22` : t.inputBg, borderColor: isActive ? Colors.GRADIENT_START : t.divider, borderWidth: isActive ? 1.5 : 1 }]} onPress={() => setSelected(opt.id)} activeOpacity={0.75}>
+              <TouchableOpacity
+                key={opt.id}
+                style={[styles.feedbackChip, {
+                  backgroundColor: isActive ? `${Colors.GRADIENT_START}22` : t.inputBg,
+                  borderColor: isActive ? Colors.GRADIENT_START : t.divider,
+                  borderWidth: isActive ? 1.5 : 1,
+                }]}
+                onPress={() => setSelected(opt.id)}
+                activeOpacity={0.75}
+              >
                 <Text style={[styles.feedbackChipText, { color: isActive ? Colors.GRADIENT_START : t.text }]}>{opt.label}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
-        <TouchableOpacity style={[styles.sheetSubmitBtn, { backgroundColor: selected ? Colors.GRADIENT_START : t.inputBg, opacity: selected ? 1 : 0.45 }]} disabled={!selected} onPress={() => { if (selected) onSelect(selected); }} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={[styles.sheetSubmitBtn, { backgroundColor: selected ? Colors.GRADIENT_START : t.inputBg, opacity: selected ? 1 : 0.45 }]}
+          disabled={!selected}
+          onPress={() => { if (selected) onSelect(selected); }}
+          activeOpacity={0.8}
+        >
           <Text style={[styles.sheetSubmitText, { color: selected ? '#fff' : t.textMuted }]}>교정 적용하기</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.sheetCloseBtn} onPress={onClose}>
@@ -405,13 +728,25 @@ function CrisisMode({ visible, partnerName, onClose }: { visible: boolean; partn
           <Text style={styles.crisisTitleText}>잠시 대화를 멈추고{'\n'}거울을 바라보세요</Text>
           <View style={styles.crisisDivider} />
           <View style={styles.crisisReflectionBox}>
-            <Text style={styles.crisisReflectionText}>방금 전 {partnerName}이의 대화에 당신이 보낸 문장은 {partnerName}이에게 단순한 반박을 넘어 <Text style={styles.crisisHighlight}>깊은 거절감을 주었을 확률이 84%</Text>입니다.</Text>
-            <Text style={[styles.crisisReflectionText, { marginTop: 12 }]}>당신은 대화를 빨리 끝내기 위해 {partnerName}이의 서운함을 <Text style={styles.crisisHighlight}>'징징거림'으로 치부</Text>하지 않았나요?</Text>
+            <Text style={styles.crisisReflectionText}>
+              방금 전 {partnerName}이의 대화에 당신이 보낸 문장은 {partnerName}이에게 단순한 반박을 넘어{' '}
+              <Text style={styles.crisisHighlight}>깊은 거절감을 주었을 확률이 84%</Text>입니다.
+            </Text>
+            <Text style={[styles.crisisReflectionText, { marginTop: 12 }]}>
+              당신은 대화를 빨리 끝내기 위해 {partnerName}이의 서운함을{' '}
+              <Text style={styles.crisisHighlight}>'징징거림'으로 치부</Text>하지 않았나요?
+            </Text>
           </View>
           <View style={styles.iMessageBox}>
             <Text style={styles.iMessageTitle}>💡 나-전달법(I-Message) 가이드</Text>
-            <Text style={styles.iMessageText}><Text style={styles.iMessageBad}>{'❌  "너는 왜 항상 그래"'}</Text>{'\n'}<Text style={styles.iMessageGood}>{'✅  "나는 그 말을 들었을 때 많이 속상했어"'}</Text></Text>
-            <Text style={styles.iMessageHint}>흥분이 가라앉은 후, 내 감정을 주어로 말해보세요.{'\n'}상대를 탓하지 않고 나의 감정을 전하는 것이 핵심입니다.</Text>
+            <Text style={styles.iMessageText}>
+              <Text style={styles.iMessageBad}>{'❌  "너는 왜 항상 그래"'}</Text>{'\n'}
+              <Text style={styles.iMessageGood}>{'✅  "나는 그 말을 들었을 때 많이 속상했어"'}</Text>
+            </Text>
+            <Text style={styles.iMessageHint}>
+              흥분이 가라앉은 후, 내 감정을 주어로 말해보세요.{'\n'}
+              상대를 탓하지 않고 나의 감정을 전하는 것이 핵심입니다.
+            </Text>
           </View>
           <TouchableOpacity style={styles.crisisActionBtn} onPress={onClose} activeOpacity={0.85}>
             <Text style={styles.crisisActionText}>👉 내 대화 습관 인정하고 돌아가기</Text>
@@ -425,12 +760,15 @@ function CrisisMode({ visible, partnerName, onClose }: { visible: boolean; partn
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
 function MessageBubble({
-  message, isRegenerating, onLongPress, onReportCardPress, t,
+  message, isRegenerating, onLongPress, onReportCardPress, t, uploadProgress, partnerName,
 }: {
-  message: Message; isRegenerating: boolean;
+  message: Message;
+  isRegenerating: boolean;
   onLongPress: (msg: Message) => void;
   onReportCardPress: () => void;
   t: ThemeTokens;
+  uploadProgress?: number;
+  partnerName: string;
 }) {
   const isUser = message.role === 'user';
   const scale = useSharedValue(0.88);
@@ -447,6 +785,7 @@ function MessageBubble({
 
   const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value, transform: [{ scale: scale.value }] }));
 
+  // Nudge banner
   if (message.type === 'nudge') {
     return (
       <Animated.View style={[styles.nudgeBanner, animStyle]}>
@@ -456,6 +795,7 @@ function MessageBubble({
     );
   }
 
+  // Weekly report card
   if (message.type === 'report_card') {
     return (
       <Animated.View style={[styles.bubbleRowAI, animStyle]}>
@@ -465,6 +805,42 @@ function MessageBubble({
     );
   }
 
+  // Image / Video media bubble
+  if (message.type === 'image' || message.type === 'video') {
+    return (
+      <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>
+        {!isUser && <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>}
+        <MediaBubble message={message} uploadProgress={uploadProgress} />
+      </Animated.View>
+    );
+  }
+
+  // Location bubble
+  if (message.type === 'location' && message.latitude !== undefined && message.longitude !== undefined) {
+    return (
+      <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>
+        {!isUser && <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>}
+        <LocationBubble latitude={message.latitude} longitude={message.longitude} role={message.role} />
+      </Animated.View>
+    );
+  }
+
+  // Gift bubble
+  if (message.type === 'gift' && message.giftName && message.giftEmoji && message.giftPrice) {
+    return (
+      <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>
+        <GiftBubble
+          giftName={message.giftName}
+          giftEmoji={message.giftEmoji}
+          giftPrice={message.giftPrice}
+          role={message.role}
+          senderName={partnerName}
+        />
+      </Animated.View>
+    );
+  }
+
+  // Normal text bubble
   const userBg = t.isLight ? '#E8E0F5' : Colors.CARD_DARK_SLATE;
   const userTxt = t.isLight ? '#2D1B69' : Colors.TEXT_ON_DARK;
   const aiBg = t.isLight ? '#FFFFFF' : '#2D1B69';
@@ -475,7 +851,12 @@ function MessageBubble({
     <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>
       {!isUser && <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>}
       <Pressable onLongPress={() => !isUser && onLongPress(message)} delayLongPress={400}>
-        <View style={[styles.bubble, isUser ? [styles.bubbleUser, { backgroundColor: userBg }] : [styles.bubbleAI, { backgroundColor: aiBg, borderColor: aiBorder }]]}>
+        <View style={[
+          styles.bubble,
+          isUser
+            ? [styles.bubbleUser, { backgroundColor: userBg }]
+            : [styles.bubbleAI, { backgroundColor: aiBg, borderColor: aiBorder }],
+        ]}>
           <Text style={[styles.bubbleText, { color: isUser ? userTxt : aiTxt }]}>{message.text}</Text>
         </View>
       </Pressable>
@@ -493,7 +874,16 @@ function ChatRoomView({
   roomType: RoomType; partnerName: string; onBack: () => void; t: ThemeTokens;
   streamState: ChatStreamReturn; onOpenReport: () => void;
 }) {
-  const { chatStyleProfile, setChatStyleProfile, privacyLevel } = useAppContext();
+  const {
+    chatStyleProfile, setChatStyleProfile, privacyLevel,
+    isEarlyDatingMode, setIsEarlyDatingMode,
+    roomEarlyModeMap, setRoomEarlyMode,
+    myProfile, trainingResult,
+  } = useAppContext();
+
+  // Room-level early dating mode — independent per-room, persists across room re-entry
+  // because roomEarlyModeMap lives in AppContext (not in local component state).
+  const isRoomEarlyMode = roomEarlyModeMap[roomType] ?? false;
   const profileRef = useRef<ChatStyleProfile>(chatStyleProfile);
   useEffect(() => { profileRef.current = chatStyleProfile; }, [chatStyleProfile]);
 
@@ -505,7 +895,10 @@ function ChatRoomView({
   const config = roomConfig[roomType];
 
   const getInitialMessages = (): Message[] => {
-    if (roomType === 'partner') return [{ id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 60000, text: `이 채팅방은 ${partnerName}님과의 실제 대화 공간이에요. 카카오톡에서 직접 대화를 이어가세요! 💌` }];
+    if (roomType === 'partner') return [{
+      id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 60000,
+      text: `이 채팅방은 ${partnerName}님과의 실제 대화 공간이에요. 카카오톡에서 직접 대화를 이어가세요! 💌`,
+    }];
     if (roomType === 'analyst') return [
       { id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 120000, text: `안녕하세요! 저는 연애 분석가 트윈이예요 🔬\n두 분의 관계를 분석하고, 더 행복한 연애를 도와드릴게요.` },
       { id: 'report-0', role: 'ai', type: 'report_card', timestamp: Date.now() - 60000, text: '' },
@@ -523,17 +916,158 @@ function ChatRoomView({
   const [correctionCount, setCorrectionCount] = useState(0);
   const [nudgeTriggered, setNudgeTriggered] = useState(false);
   const [showAttachBar, setShowAttachBar] = useState(false);
+  // Step #17 new state
+  const [uploadProgressMap, setUploadProgressMap] = useState<Map<string, number>>(new Map());
+  const [giftSheetVisible, setGiftSheetVisible] = useState(false);
+  // Step #18: LLM call in-flight indicator
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const toneWeightRef = useRef<ToneWeight>({ warmth: 0, humor: 0 });
+  // Step #18: rolling chat history ref for multi-turn LLM context
+  const chatHistoryRef = useRef<Message[]>([]);
   const flatListRef = useRef<FlatList>(null);
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMessages = useRef<string[]>([]);
   const lastSendTimeRef = useRef<number>(0);
 
   const addMessage = useCallback((msg: Message) => {
-    setMessages((prev) => [...prev, msg]);
+    setMessages((prev) => {
+      const next = [...prev, msg];
+      chatHistoryRef.current = next;
+      return next;
+    });
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
   }, []);
+
+  // ── [Step #17] Realtime partner message listener ────────────────────────────
+  useEffect(() => {
+    if (roomType !== 'partner') return undefined;
+    // coupleId comes from AppContext.coupleProfile.id in production
+    const coupleId = 'demo-couple-id';
+    const cleanup = initChatroomRealtimeSocket(coupleId, (incoming: RealtimeIncomingMessage) => {
+      addMessage({
+        id: incoming.id,
+        role: 'ai',
+        text: incoming.text,
+        timestamp: incoming.timestamp,
+        type: incoming.type,
+        mediaUri: incoming.mediaUri,
+        latitude: incoming.latitude,
+        longitude: incoming.longitude,
+        giftName: incoming.giftName,
+        giftEmoji: incoming.giftEmoji,
+        giftPrice: incoming.giftPrice,
+      });
+    });
+    return cleanup;
+  }, [roomType, addMessage]);
+
+  // ── [Step #17] Image picker ─────────────────────────────────────────────────
+  const handlePickImage = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '사진 라이브러리 접근 권한이 필요합니다.\n설정에서 권한을 허용해주세요.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.85,
+        allowsEditing: true,
+        aspect: [4, 3],
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      const msgId = `img-${Date.now()}`;
+      addMessage({ id: msgId, role: 'user', text: '', timestamp: Date.now(), type: 'image', mediaUri: asset.uri });
+      setUploadProgressMap((prev) => new Map(prev).set(msgId, 1));
+      try {
+        await uploadMediaFile(asset.uri, 'image', (pct) => {
+          setUploadProgressMap((prev) => new Map(prev).set(msgId, pct));
+        });
+        setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
+      } catch {
+        Alert.alert('업로드 실패', '이미지 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
+      }
+    } catch {
+      Alert.alert('오류', '갤러리를 열 수 없습니다.');
+    }
+  }, [addMessage]);
+
+  // ── [Step #17] Video picker ─────────────────────────────────────────────────
+  const handlePickVideo = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '사진 라이브러리 접근 권한이 필요합니다.\n설정에서 권한을 허용해주세요.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        quality: 0.7,
+        videoMaxDuration: 60,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      const msgId = `vid-${Date.now()}`;
+      addMessage({ id: msgId, role: 'user', text: '', timestamp: Date.now(), type: 'video', mediaUri: asset.uri });
+      setUploadProgressMap((prev) => new Map(prev).set(msgId, 1));
+      // Video compression would happen here in production (e.g. via expo-video or ffmpeg-kit)
+      try {
+        await uploadMediaFile(asset.uri, 'video', (pct) => {
+          setUploadProgressMap((prev) => new Map(prev).set(msgId, pct));
+        });
+        setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
+      } catch {
+        Alert.alert('업로드 실패', '동영상 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
+      }
+    } catch {
+      Alert.alert('오류', '갤러리를 열 수 없습니다.');
+    }
+  }, [addMessage]);
+
+  // ── [Step #17] Location sharing ─────────────────────────────────────────────
+  const handleShareLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '위치 서비스 접근 권한이 필요합니다.\n설정에서 권한을 허용해주세요.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      addMessage({
+        id: `loc-${Date.now()}`,
+        role: 'user',
+        text: '',
+        timestamp: Date.now(),
+        type: 'location',
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert('위치 오류', '현재 위치를 가져올 수 없습니다. 잠시 후 다시 시도해주세요.');
+    }
+  }, [addMessage]);
+
+  // ── [Step #17] Gift send ────────────────────────────────────────────────────
+  const handleSendGift = useCallback((gift: GiftItem) => {
+    setGiftSheetVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 300);
+    addMessage({
+      id: `gift-${Date.now()}`,
+      role: 'user',
+      text: '',
+      timestamp: Date.now(),
+      type: 'gift',
+      giftName: gift.name,
+      giftEmoji: gift.emoji,
+      giftPrice: gift.price,
+    });
+  }, [addMessage]);
 
   // Handle deadlock nudge arriving in AI room
   useEffect(() => {
@@ -547,10 +1081,41 @@ function ChatRoomView({
     }
   }, [streamState.deadlockNudge, roomType, addMessage, streamState]);
 
-  const triggerAIReply = useCallback((userTexts: string[]) => {
+  const triggerAIReply = useCallback(async (userTexts: string[]) => {
     const profile = profileRef.current;
     setIsTyping(true);
-    const reply = mockAIReplyWithWeight(userTexts, roomType, toneWeightRef.current);
+    setIsAnalyzing(true);
+
+    // Build multi-turn history for LLM context (skip media/nudge bubbles)
+    const history: ChatHistoryItem[] = chatHistoryRef.current
+      .filter((m) => m.type === 'normal' && m.text.trim())
+      .slice(-20)
+      .map((m) => ({
+        role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: m.text,
+      }));
+
+    let reply: string;
+    try {
+      reply = await requestSelfAiLlmResponse(
+        userTexts.filter(Boolean).join('\n'),
+        history,
+        {
+          myProfile,
+          trainingResult,
+          chatStyleProfile: profile,
+          isEarlyDatingMode,
+          isRoomEarlyMode,
+          privacyLevel,
+          roomType: roomType === 'analyst' ? 'analyst' : 'ai',
+        },
+      );
+    } catch {
+      reply = '잠시 생각을 정리 중이에요. 잠시 후 다시 말을 걸어주세요! 🕊️';
+    } finally {
+      setIsAnalyzing(false);
+    }
+
     const parts = dynamicSplitReply(reply, profile);
     let cum = Math.round(profile.burstInterval * 0.4);
     parts.forEach((part, i) => {
@@ -561,7 +1126,7 @@ function ChatRoomView({
       }, delay);
       cum += calcBubbleDelay(part, profile);
     });
-  }, [addMessage, roomType]);
+  }, [addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel]);
 
   const applyRollingAverage = useCallback((text: string, gapMs: number) => {
     const p = profileRef.current;
@@ -579,7 +1144,7 @@ function ChatRoomView({
     const text = inputText.trim();
     if (!text) return;
     setInputText('');
-    streamState.checkSensitive(''); // clear sensitive warning on send
+    streamState.checkSensitive('');
 
     const now = Date.now();
     const gap = lastSendTimeRef.current > 0 ? now - lastSendTimeRef.current : 0;
@@ -587,7 +1152,6 @@ function ChatRoomView({
 
     addMessage({ id: `u-${now}`, role: 'user', text, timestamp: now, type: 'normal' });
 
-    // Tap the message to the AI analysis stream (partner room only)
     if (roomType === 'partner') streamState.tapMessage(text);
 
     if (detectCrisis(text)) {
@@ -629,11 +1193,42 @@ function ChatRoomView({
     if (selectedMessage) {
       const id = selectedMessage.id;
       setRegeneratingId(id);
-      setTimeout(() => {
-        const newText = mockAIReplyWithWeight([], roomType, toneWeightRef.current);
+
+      const TONE_HINTS: Record<ToneFeedback, string> = {
+        too_warm: '조금 더 자연스럽고 평범한 톤으로 다시 답해줘.',
+        too_cold: '좀 더 따뜻하고 친근하게 다시 답해줘.',
+        no_humor: '유머보다 공감 중심으로 자연스럽게 다시 답해줘.',
+      };
+      const lastUserText = chatHistoryRef.current
+        .filter((m) => m.role === 'user' && m.type === 'normal')
+        .slice(-1)[0]?.text ?? '';
+      const regenHistory: ChatHistoryItem[] = chatHistoryRef.current
+        .filter((m) => m.type === 'normal' && m.text.trim() && m.id !== id)
+        .slice(-18)
+        .map((m) => ({
+          role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: m.text,
+        }));
+
+      requestSelfAiLlmResponse(
+        `${lastUserText}\n[말투 재생성 요청: ${TONE_HINTS[fb]}]`,
+        regenHistory,
+        {
+          myProfile,
+          trainingResult,
+          chatStyleProfile: profileRef.current,
+          isEarlyDatingMode,
+          isRoomEarlyMode,
+          privacyLevel,
+          roomType: 'ai',
+        },
+      ).then((newText) => {
         setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: newText } : m)));
         setTimeout(() => setRegeneratingId(null), 80);
-      }, 700);
+      }).catch(() => {
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: '잠시 생각을 정리 중이에요. 잠시 후 다시 말을 걸어주세요! 🕊️' } : m)));
+        setTimeout(() => setRegeneratingId(null), 80);
+      });
     }
     if (newCount >= 3 && !nudgeTriggered) {
       setNudgeTriggered(true);
@@ -642,9 +1237,8 @@ function ChatRoomView({
       }, 1200);
     }
     setSelectedMessage(null);
-  }, [correctionCount, nudgeTriggered, selectedMessage, addMessage, roomType]);
+  }, [correctionCount, nudgeTriggered, selectedMessage, addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel]);
 
-  // Current tone alert to display (only in AI room, show one at a time)
   const currentToneAlert = roomType === 'ai' && streamState.pendingToneAlerts.length > 0
     ? streamState.pendingToneAlerts[0]
     : null;
@@ -677,18 +1271,27 @@ function ChatRoomView({
           </Pressable>
         )}
         {roomType === 'ai' && (
-          <View style={styles.earlyModeToggle}>
-            <Text style={[styles.earlyModeLabel, { color: t.textMuted }]}>연애 초기</Text>
-            <View style={[styles.toggleTrack, { backgroundColor: t.card }]}><View style={styles.toggleKnob} /></View>
-          </View>
+          <EarlyModeToggle
+            value={isRoomEarlyMode}
+            onChange={(v) => setRoomEarlyMode(roomType, v)}
+            label="연애 초기"
+            t={t}
+          />
         )}
       </View>
 
       {/* Profile HUD (AI rooms only) */}
       {roomType !== 'partner' && <ProfileHUD profile={chatStyleProfile} t={t} />}
 
-      {/* Attachment bar (partner room) */}
-      {roomType === 'partner' && showAttachBar && <AttachmentBar partnerName={partnerName} />}
+      {/* [Step #17] Updated Attachment bar (partner room) */}
+      {roomType === 'partner' && showAttachBar && (
+        <AttachmentBar
+          onPickImage={handlePickImage}
+          onPickVideo={handlePickVideo}
+          onShareLocation={handleShareLocation}
+          onOpenGiftCatalog={() => setGiftSheetVisible(true)}
+        />
+      )}
 
       {/* Tone Guide Drop-in popup (AI room) */}
       {currentToneAlert && (
@@ -708,6 +1311,8 @@ function ChatRoomView({
               isRegenerating={regeneratingId === item.id}
               t={t}
               onReportCardPress={onOpenReport}
+              uploadProgress={uploadProgressMap.get(item.id)}
+              partnerName={partnerName}
               onLongPress={(msg) => {
                 if (roomType !== 'partner') {
                   setSelectedMessage(msg);
@@ -717,7 +1322,7 @@ function ChatRoomView({
               }}
             />
           )}
-          ListFooterComponent={isTyping ? <TypingIndicator partnerName={partnerName} t={t} /> : null}
+          ListFooterComponent={isTyping ? <TypingIndicator partnerName={partnerName} t={t} isAnalyzing={isAnalyzing} /> : null}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
 
@@ -752,20 +1357,31 @@ function ChatRoomView({
         </View>
       </KeyboardAvoidingView>
 
-      <ToneFeedbackSheet visible={feedbackVisible} t={t} onClose={() => { setFeedbackVisible(false); setSelectedMessage(null); }} onSelect={handleToneFeedback} />
+      <ToneFeedbackSheet
+        visible={feedbackVisible} t={t}
+        onClose={() => { setFeedbackVisible(false); setSelectedMessage(null); }}
+        onSelect={handleToneFeedback}
+      />
       <CrisisMode visible={crisisVisible} partnerName={partnerName} onClose={() => setCrisisVisible(false)} />
+
+      {/* [Step #17] Gift Catalog Sheet */}
+      <GiftCatalogSheet
+        visible={giftSheetVisible}
+        onClose={() => setGiftSheetVisible(false)}
+        onSelect={handleSendGift}
+        t={t}
+      />
     </SafeAreaView>
   );
 }
 
-// ─── [NEW] Gradient Glow Avatar (partner row) ─────────────────────────────────
+// ─── Gradient Glow Avatar (partner row) ──────────────────────────────────────
 
 function PartnerGlowAvatar({ emoji, t }: { emoji: string; t: ThemeTokens }) {
   return (
     <LinearGradient
       colors={['#FF6B8B', '#D946EF', '#7C3AED']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
       style={styles.partnerGlowRing}
     >
       <View style={[styles.partnerGlowInner, { backgroundColor: t.card }]}>
@@ -829,19 +1445,17 @@ function DMListView({
 }: {
   partnerName: string; onEnterRoom: (room: RoomType) => void; t: ThemeTokens; toneAlertCount: number;
 }) {
+  const { isEarlyDatingMode, setIsEarlyDatingMode } = useAppContext();
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]} edges={['top']}>
       <View style={styles.listHeader}>
         <Text style={[styles.listTitle, { color: t.text }]}>채팅</Text>
-        <View style={styles.earlyModeBadge}>
-          <Text style={[styles.earlyModeBadgeText, { color: t.textMuted }]}>연애 초기 모드</Text>
-          <View style={[styles.toggleTrack, { backgroundColor: t.card }]}><View style={styles.toggleKnob} /></View>
-        </View>
+        <EarlyModeToggle value={isEarlyDatingMode} onChange={setIsEarlyDatingMode} label="연애 초기 모드" t={t} />
       </View>
       <View style={[styles.listDivider, { backgroundColor: t.divider }]} />
 
       <Animated.View entering={FadeIn.duration(300)} style={styles.dmList}>
-        {/* Room 1: Partner (top-pinned, gradient glow) */}
         <Animated.View entering={FadeInRight.delay(0).duration(300)}>
           <DMRow
             emoji="❤️" name={partnerName}
@@ -850,7 +1464,6 @@ function DMListView({
           />
         </Animated.View>
 
-        {/* Divider + "AI" label */}
         <View style={[styles.aiSectionLabel, { borderTopColor: t.divider }]}>
           <View style={[styles.aiSectionLine, { backgroundColor: t.divider }]} />
           <View style={styles.aiSectionBadge}>
@@ -859,7 +1472,6 @@ function DMListView({
           <View style={[styles.aiSectionLine, { backgroundColor: t.divider }]} />
         </View>
 
-        {/* Room 2: Self-AI (tone alert badge) */}
         <Animated.View entering={FadeInRight.delay(100).duration(300)}>
           <DMRow
             emoji="💜" name={`${partnerName} AI`} badge="AI"
@@ -870,7 +1482,6 @@ function DMListView({
         </Animated.View>
         <View style={[styles.rowDivider, { backgroundColor: t.divider }]} />
 
-        {/* Room 3: Analyst chatbot */}
         <Animated.View entering={FadeInRight.delay(180).duration(300)}>
           <DMRow
             emoji="🔬" name="분석가 트윈이 💬" badge="AI"
@@ -880,7 +1491,6 @@ function DMListView({
         </Animated.View>
       </Animated.View>
 
-      {/* Tip box */}
       <View style={styles.tipBox}>
         <Text style={styles.tipText}>
           💡 커플 방에서 날카로운 말투가 감지되면, AI 방에서 실시간 말투 가이드를 받아보세요.
@@ -943,16 +1553,9 @@ const styles = StyleSheet.create({
   dmList: { flex: 1 },
 
   // AI section separator
-  aiSectionLabel: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.base,
-    paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, gap: 8,
-  },
+  aiSectionLabel: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.base, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
   aiSectionLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  aiSectionBadge: {
-    backgroundColor: `${Colors.BADGE_AI_BLUE}18`, borderRadius: Radius.pill,
-    paddingHorizontal: 8, paddingVertical: 2,
-    borderWidth: 1, borderColor: `${Colors.BADGE_AI_BLUE}35`,
-  },
+  aiSectionBadge: { backgroundColor: `${Colors.BADGE_AI_BLUE}18`, borderRadius: Radius.pill, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: `${Colors.BADGE_AI_BLUE}35` },
   aiSectionBadgeText: { color: Colors.BADGE_AI_BLUE, fontSize: 9, fontWeight: FontWeight.semibold },
 
   // DM Row
@@ -960,24 +1563,18 @@ const styles = StyleSheet.create({
   dmAvatarWrap: { position: 'relative', width: 52, height: 52 },
   dmAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   dmAvatarEmoji: { fontSize: 26 },
-
-  // Gradient glow avatar
   partnerGlowRing: { width: 52, height: 52, borderRadius: 26, padding: 2.5 },
   partnerGlowInner: { flex: 1, borderRadius: 23.5, alignItems: 'center', justifyContent: 'center' },
-
-  // Badges
   dmBadge: { position: 'absolute', bottom: -2, right: -4, backgroundColor: Colors.BADGE_AI_BLUE, borderRadius: 6, paddingHorizontal: 4, paddingVertical: 1 },
   dmBadgeText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },
   alertCountBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
   alertCountText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },
-
   dmInfo: { flex: 1, gap: 4 },
   dmNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dmName: { fontSize: FontSize.base, fontWeight: FontWeight.semibold },
   dmTime: { fontSize: FontSize.xs },
   dmPreview: { fontSize: FontSize.sm },
   rowDivider: { height: StyleSheet.hairlineWidth, marginLeft: Spacing.base + 52 + Spacing.md },
-
   tipBox: { marginHorizontal: Spacing.base, marginBottom: 80, backgroundColor: 'rgba(56,189,248,0.08)', borderRadius: Radius.md, padding: Spacing.md, borderWidth: 1, borderColor: 'rgba(56,189,248,0.2)' },
   tipText: { color: Colors.BADGE_AI_BLUE, fontSize: FontSize.xs, lineHeight: 18 },
 
@@ -992,10 +1589,17 @@ const styles = StyleSheet.create({
   aiBadgeHeaderText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },
   headerName: { fontSize: FontSize.base, fontWeight: FontWeight.semibold },
   headerStatus: { fontSize: FontSize.xs, marginTop: 1 },
-  earlyModeToggle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  earlyModeLabel: { fontSize: FontSize.xs },
-  toggleTrack: { width: 32, height: 18, borderRadius: 9, justifyContent: 'center', paddingHorizontal: 2 },
-  toggleKnob: { width: 14, height: 14, borderRadius: 7, backgroundColor: Colors.TEXT_MUTED },
+
+  // Early Mode Toggle (Step #19 — room-level version with gradient border ring)
+  earlyToggleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  earlyToggleLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
+  // Outer glow shell — borderRadius must accommodate 1.5px border + 10px inner radius
+  earlyToggleOuter: { borderRadius: 12, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0, shadowRadius: 0, width: 37, height: 23, justifyContent: 'center', alignItems: 'center' },
+  // Gradient ring layer — sits inside earlyToggleOuter, fills it entirely
+  earlyToggleRing: { borderRadius: 12, overflow: 'hidden' },
+  // Track sits inside the ring with margin to reveal gradient border when active
+  earlyToggleTrack: { width: 34, height: 20, borderRadius: 10, justifyContent: 'center', overflow: 'hidden' },
+  earlyToggleKnob: { position: 'absolute', width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFFFFF', top: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.25, shadowRadius: 1.5, elevation: 2 },
 
   // Attach toggle
   attachToggleBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
@@ -1003,7 +1607,7 @@ const styles = StyleSheet.create({
 
   // Attach bar
   attachBar: { flexDirection: 'row', paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, gap: Spacing.base, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(124,58,237,0.15)', backgroundColor: 'rgba(124,58,237,0.04)' },
-  attachBtn: { alignItems: 'center', gap: 3 },
+  attachBtn: { alignItems: 'center', gap: 3, flex: 1 },
   attachBtnIcon: { fontSize: 24 },
   attachBtnLabel: { fontSize: 9, color: Colors.TEXT_MUTED },
 
@@ -1013,28 +1617,14 @@ const styles = StyleSheet.create({
   hudDivider: { fontSize: 10 },
 
   // Sensitive Warning Banner
-  sensitiveBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: Spacing.base, marginBottom: 4,
-    backgroundColor: 'rgba(251,191,36,0.12)', borderRadius: Radius.md,
-    padding: Spacing.sm, paddingHorizontal: Spacing.md,
-    borderWidth: 1.5, borderColor: 'rgba(251,191,36,0.45)',
-  },
+  sensitiveBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: Spacing.base, marginBottom: 4, backgroundColor: 'rgba(251,191,36,0.12)', borderRadius: Radius.md, padding: Spacing.sm, paddingHorizontal: Spacing.md, borderWidth: 1.5, borderColor: 'rgba(251,191,36,0.45)' },
   sensitiveIcon: { fontSize: 14 },
   sensitiveText: { flex: 1, color: '#FDE68A', fontSize: FontSize.xs, lineHeight: 17 },
   sensitiveDismiss: { padding: 4 },
   sensitiveDismissText: { color: '#FBBF24', fontSize: 12 },
 
-  // Tone Guide Popup (Drop-in)
-  tonePopup: {
-    marginHorizontal: Spacing.base,
-    marginBottom: Spacing.sm,
-    backgroundColor: 'rgba(30,41,59,0.95)',
-    borderRadius: Radius.xl,
-    padding: Spacing.base,
-    borderWidth: 1.5, borderColor: 'rgba(56,189,248,0.35)',
-    ...Shadows.subtle,
-  },
+  // Tone Guide Popup
+  tonePopup: { marginHorizontal: Spacing.base, marginBottom: Spacing.sm, backgroundColor: 'rgba(30,41,59,0.95)', borderRadius: Radius.xl, padding: Spacing.base, borderWidth: 1.5, borderColor: 'rgba(56,189,248,0.35)', ...Shadows.subtle },
   tonePopupHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   tonePopupIcon: { fontSize: 16 },
   tonePopupTitle: { flex: 1, color: Colors.BADGE_AI_BLUE, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
@@ -1046,6 +1636,60 @@ const styles = StyleSheet.create({
   tonePopupSuggRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   tonePopupSuggLabel: { color: Colors.BADGE_AI_BLUE, fontSize: FontSize.xs, fontWeight: FontWeight.bold, marginTop: 1 },
   tonePopupSuggText: { flex: 1, color: '#A78BFA', fontSize: FontSize.xs, lineHeight: 18 },
+
+  // ── [Step #17] Media Bubble ───────────────────────────────────────────────
+  mediaBubble: { borderRadius: Radius.lg, overflow: 'hidden', maxWidth: 220 },
+  mediaBubbleUser: { alignSelf: 'flex-end' },
+  mediaBubbleAI: { alignSelf: 'flex-start' },
+  mediaImage: { width: 220, height: 165, borderRadius: Radius.lg },
+  videoPlaceholder: { width: 220, height: 140, borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(30,41,59,0.85)', overflow: 'hidden', gap: 6 },
+  videoPlaceholderIcon: { fontSize: 36 },
+  videoPlaceholderText: { color: '#E2D9FF', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  uploadOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(10,13,26,0.78)', paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center', gap: 5 },
+  uploadProgressTrack: { width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' },
+  uploadProgressFill: { height: '100%', backgroundColor: Colors.GRADIENT_END, borderRadius: 2 },
+  uploadProgressText: { color: '#fff', fontSize: 10, fontWeight: FontWeight.semibold },
+
+  // ── [Step #17] Location Bubble ────────────────────────────────────────────
+  locationCard: { borderRadius: Radius.xl, overflow: 'hidden', maxWidth: 240 },
+  locationCardUser: { alignSelf: 'flex-end' },
+  locationCardAI: { alignSelf: 'flex-start' },
+  locationGradBg: { padding: 0 },
+  locationMapMock: { height: 100, backgroundColor: 'rgba(15,23,42,0.55)', position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  locationGridWrap: { flexDirection: 'row', flexWrap: 'wrap', width: 80, height: 80, opacity: 0.25 },
+  locationGridDot: { width: 20, height: 20, borderWidth: 0.5, borderColor: '#7C3AED' },
+  locationPinWrap: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  locationMapPin: { fontSize: 28 },
+  locationInfo: { padding: Spacing.md, gap: 3 },
+  locationLabel: { color: '#E2D9FF', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  locationCoords: { color: 'rgba(226,217,255,0.6)', fontSize: 10, fontFamily: 'monospace' },
+  locationOpenBtn: { marginTop: 5, backgroundColor: 'rgba(124,58,237,0.3)', borderRadius: Radius.md, paddingVertical: 5, paddingHorizontal: 10, alignSelf: 'flex-start' },
+  locationOpenText: { color: '#A78BFA', fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
+
+  // ── [Step #17] Gift Bubble ────────────────────────────────────────────────
+  giftBubbleWrap: { maxWidth: 240 },
+  giftBubbleWrapUser: { alignSelf: 'flex-end' },
+  giftBubbleWrapAI: { alignSelf: 'flex-start' },
+  giftBubbleGradBorder: { borderRadius: Radius.xl, padding: 2 },
+  giftBubbleInner: { backgroundColor: 'rgba(10,13,26,0.92)', borderRadius: Radius.xl - 1, alignItems: 'center', padding: Spacing.base, gap: 4, overflow: 'hidden' },
+  giftBubbleGlow: { borderRadius: Radius.xl, backgroundColor: 'rgba(217,70,239,0.12)' },
+  giftBubbleEmoji: { fontSize: 36 },
+  giftBubbleTitle: { color: '#FDA4AF', fontSize: FontSize.xs, fontWeight: FontWeight.semibold, textAlign: 'center' },
+  giftBubbleName: { color: '#F1F5F9', fontSize: FontSize.base, fontWeight: FontWeight.extrabold, textAlign: 'center' },
+  giftBubblePrice: { color: 'rgba(241,245,249,0.5)', fontSize: FontSize.xs, textAlign: 'center' },
+
+  // ── [Step #17] Gift Catalog Sheet ────────────────────────────────────────
+  giftSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: Radius['2xl'], borderTopRightRadius: Radius['2xl'], paddingHorizontal: Spacing.base, paddingBottom: Spacing['3xl'], paddingTop: Spacing.md, borderTopWidth: 1 },
+  giftSheetTitle: { fontSize: FontSize.md, fontWeight: FontWeight.extrabold, textAlign: 'center', marginBottom: 4 },
+  giftSheetSubtitle: { fontSize: FontSize.sm, textAlign: 'center', marginBottom: Spacing.md },
+  giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: Spacing.md },
+  giftGridItem: { width: '30%', borderRadius: Radius.lg, padding: Spacing.sm, alignItems: 'center', gap: 3 },
+  giftGridEmoji: { fontSize: 28 },
+  giftGridName: { fontSize: 10, fontWeight: FontWeight.semibold, textAlign: 'center' },
+  giftGridPrice: { fontSize: 9, textAlign: 'center' },
+  giftSendBtn: { borderRadius: Radius.pill, overflow: 'hidden', marginBottom: Spacing.sm },
+  giftSendBtnGrad: { paddingVertical: Spacing.md, alignItems: 'center' },
+  giftSendBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
 
   // Messages
   messageList: { paddingHorizontal: Spacing.base, paddingTop: Spacing.md, paddingBottom: Spacing.lg, gap: 6 },
@@ -1077,7 +1721,7 @@ const styles = StyleSheet.create({
   sendBtnDisabled: { opacity: 0.35 },
   sendBtnText: { color: '#fff', fontSize: 18, fontWeight: FontWeight.bold, marginTop: -1 },
 
-  // Bottom Sheet
+  // Bottom Sheet (Tone Feedback)
   dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' },
   bottomSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: Radius['2xl'], borderTopRightRadius: Radius['2xl'], paddingHorizontal: Spacing.xl, paddingBottom: Spacing['3xl'], paddingTop: Spacing.md, borderTopWidth: 1 },
   sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.TEXT_MUTED, alignSelf: 'center', marginBottom: Spacing.base },

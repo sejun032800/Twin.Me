@@ -4,6 +4,12 @@ import {
   ChatStyleProfile,
   DEFAULT_CHAT_STYLE_PROFILE,
 } from '../lib/kakaoParser';
+import {
+  FALLBACK_MOOD_TAGS,
+  PartnerAiMoodTag,
+} from '../services/partnerMoodService';
+
+export type { PartnerAiMoodTag };
 
 export type { ChatStyleProfile };
 
@@ -36,6 +42,11 @@ export interface DateCourse {
   myReview: string;
   partnerRating: number;  // 1–5 (mocked until real partner sync)
   partnerReview: string;
+  // Memory ring metadata
+  imageUrl?: string;
+  myOotd?: string;
+  partnerOotd?: string;
+  isRead?: boolean;
 }
 
 export interface RecommendedPlace {
@@ -69,6 +80,15 @@ export interface TrainingResult {
   maskedCount: number;   // PII items masked
 }
 
+// Weekly emotion analysis scores (0-100) feeding the temperature engine
+export interface WeeklyMetrics {
+  currentScore: number;       // my this week's aggregated sentiment (0–100)
+  prevScore: number;          // my last week's score for delta computation
+  partnerScore: number;       // partner's current week sentiment (0–100)
+  weeklyMessageCount: number; // total messages sent this week (density proxy)
+  avgReplyTimeMin: number;    // average reply turnaround in minutes
+}
+
 interface AppContextValue {
   accuracyBannerVisible: boolean;
   dismissAccuracyBanner: () => void;
@@ -82,6 +102,9 @@ interface AppContextValue {
   // Onboarding pipeline data
   inviteCode: string;
   setInviteCode: (code: string) => void;
+  // Couple_ID — set after successful partner code match, used for data isolation
+  coupleId: string | null;
+  setCoupleId: (id: string | null) => void;
   trainingResult: TrainingResult | null;
   setTrainingResult: (result: TrainingResult) => void;
   // Raw KakaoTalk file text — set by ingestion screen, consumed by loading screen
@@ -98,6 +121,27 @@ interface AppContextValue {
   addDateCourse: (course: DateCourse) => void;
   removeDateCourse: (id: string) => void;
   bulkAddDateCourses: (courses: DateCourse[]) => void;
+  markCourseAsRead: (id: string) => void;
+  // Cross-tab trigger: home [+추가] → history AddCourseSheet
+  triggerAddCourse: boolean;
+  setTriggerAddCourse: (v: boolean) => void;
+  // 10-min AI interview completion — drives +20% accuracy weight
+  hasCompletedInterview: boolean;
+  setHasCompletedInterview: (v: boolean) => void;
+  // Weekly emotion metrics — drives temperature engine on home tab
+  weeklyMetrics: WeeklyMetrics;
+  setWeeklyMetrics: (m: WeeklyMetrics) => void;
+  // Partner AI real-time mood tags (A2A sync, P2 pipeline)
+  partnerAiMood: PartnerAiMoodTag[];
+  setPartnerAiMood: (tags: PartnerAiMoodTag[]) => void;
+  // Early Dating Mode — prompt modifier + chat UI state (Step #16)
+  isEarlyDatingMode: boolean;
+  setIsEarlyDatingMode: (v: boolean) => void;
+  // Room-level Early Dating Mode — per-room independent toggle (Step #19)
+  // Key is RoomType ('ai' | 'analyst'), value is whether the room-specific toggle is on.
+  // Survives ChatRoomView unmount since it lives in AppContext.
+  roomEarlyModeMap: Record<string, boolean>;
+  setRoomEarlyMode: (roomId: string, value: boolean) => void;
 }
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
@@ -114,6 +158,10 @@ const MOCK_COURSES: DateCourse[] = [
     myReview: '분위기 미쳤다 진짜',
     partnerRating: 4,
     partnerReview: '커피가 좀 쓴데 분위기는 찰떡',
+    imageUrl: 'https://picsum.photos/seed/cafe/400/300',
+    myOotd: '흰 린넨 셔츠 + 슬랙스',
+    partnerOotd: '플로럴 원피스',
+    isRead: true,
   },
   {
     id: 'c2',
@@ -125,6 +173,10 @@ const MOCK_COURSES: DateCourse[] = [
     myReview: '100일 기념 최고였어',
     partnerRating: 5,
     partnerReview: '영원히 이 순간 기억할게',
+    imageUrl: 'https://picsum.photos/seed/hangang/400/300',
+    myOotd: '네이비 스트라이프 티 + 청바지',
+    partnerOotd: '크림 니트 + 와이드 팬츠',
+    isRead: false,
   },
   {
     id: 'c3',
@@ -136,6 +188,10 @@ const MOCK_COURSES: DateCourse[] = [
     myReview: '안주가 진짜 맛있었음',
     partnerRating: 5,
     partnerReview: '술이 술술 들어가던 밤',
+    imageUrl: 'https://picsum.photos/seed/izakaya/400/300',
+    myOotd: '블랙 반팔 + 카고 팬츠',
+    partnerOotd: '레드 슬리브리스 + 미니스커트',
+    isRead: false,
   },
 ];
 
@@ -151,6 +207,8 @@ const AppContext = createContext<AppContextValue>({
   themeTokens: LIGHT_THEME,
   inviteCode: '',
   setInviteCode: () => {},
+  coupleId: null,
+  setCoupleId: () => {},
   trainingResult: null,
   setTrainingResult: () => {},
   rawKakaoText: null,
@@ -163,6 +221,19 @@ const AppContext = createContext<AppContextValue>({
   addDateCourse: () => {},
   removeDateCourse: () => {},
   bulkAddDateCourses: () => {},
+  markCourseAsRead: () => {},
+  triggerAddCourse: false,
+  setTriggerAddCourse: () => {},
+  hasCompletedInterview: false,
+  setHasCompletedInterview: () => {},
+  weeklyMetrics: { currentScore: 65, prevScore: 62, partnerScore: 52, weeklyMessageCount: 145, avgReplyTimeMin: 7 },
+  setWeeklyMetrics: () => {},
+  partnerAiMood: FALLBACK_MOOD_TAGS,
+  setPartnerAiMood: () => {},
+  isEarlyDatingMode: false,
+  setIsEarlyDatingMode: () => {},
+  roomEarlyModeMap: {},
+  setRoomEarlyMode: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -171,11 +242,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [partnerProfile, setPartnerProfile] = useState<PartnerProfile>(defaultPartnerProfile);
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
   const [inviteCode, setInviteCode] = useState('');
+  const [coupleId, setCoupleId] = useState<string | null>(null);
   const [trainingResult, setTrainingResult] = useState<TrainingResult | null>(null);
   const [rawKakaoText, setRawKakaoText] = useState<string | null>(null);
   const [chatStyleProfile, setChatStyleProfile] = useState<ChatStyleProfile>(DEFAULT_CHAT_STYLE_PROFILE);
   const [privacyLevel, setPrivacyLevel] = useState<PrivacyLevel>(3);
   const [dateCourses, setDateCourses] = useState<DateCourse[]>(MOCK_COURSES);
+  const [triggerAddCourse, setTriggerAddCourse] = useState(false);
+  const [hasCompletedInterview, setHasCompletedInterview] = useState(false);
+  const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetrics>({ currentScore: 65, prevScore: 62, partnerScore: 52, weeklyMessageCount: 145, avgReplyTimeMin: 7 });
+  const [partnerAiMood, setPartnerAiMood] = useState<PartnerAiMoodTag[]>(FALLBACK_MOOD_TAGS);
+  const [isEarlyDatingMode, setIsEarlyDatingMode] = useState(false);
+  const [roomEarlyModeMap, setRoomEarlyModeState] = useState<Record<string, boolean>>({});
+  const setRoomEarlyMode = (roomId: string, value: boolean) =>
+    setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
 
@@ -185,6 +265,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDateCourses((prev) => prev.filter((c) => c.id !== id));
   const bulkAddDateCourses = (courses: DateCourse[]) =>
     setDateCourses((prev) => [...courses, ...prev]);
+  const markCourseAsRead = (id: string) =>
+    setDateCourses((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, isRead: true } : c))
+    );
 
   return (
     <AppContext.Provider
@@ -200,6 +284,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         themeTokens,
         inviteCode,
         setInviteCode,
+        coupleId,
+        setCoupleId,
         trainingResult,
         setTrainingResult,
         rawKakaoText,
@@ -212,6 +298,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addDateCourse,
         removeDateCourse,
         bulkAddDateCourses,
+        markCourseAsRead,
+        triggerAddCourse,
+        setTriggerAddCourse,
+        hasCompletedInterview,
+        setHasCompletedInterview,
+        weeklyMetrics,
+        setWeeklyMetrics,
+        partnerAiMood,
+        setPartnerAiMood,
+        isEarlyDatingMode,
+        setIsEarlyDatingMode,
+        roomEarlyModeMap,
+        setRoomEarlyMode,
       }}
     >
       {children}

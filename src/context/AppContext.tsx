@@ -88,6 +88,7 @@ export interface UserProfile {
   mbti: string;
   enneagram: string;
   avatarUrl?: string;
+  statusMessage?: string;
 }
 
 export interface PartnerProfile {
@@ -182,6 +183,8 @@ interface AppContextValue {
   // IAP subscription status — updated on successful receipt verification (Step #39)
   subscriptionStatus: SubscriptionStatus;
   setSubscriptionStatus: (status: SubscriptionStatus) => void;
+  // Resets all session state to initial defaults (Step #43 — logout pipeline)
+  resetSession: () => void;
 }
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
@@ -284,6 +287,7 @@ const AppContext = createContext<AppContextValue>({
   addUploadedMedia: () => {},
   subscriptionStatus: DEFAULT_SUBSCRIPTION_STATUS,
   setSubscriptionStatus: () => {},
+  resetSession: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -315,6 +319,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUploadedMediaCount((prev) => prev + delta);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
     setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
+
+  // Resets every state slice back to its initial default (Step #43 — logout pipeline).
+  // Deliberately preserves themeMode so the display preference survives re-login.
+  const resetSession = () => {
+    setAccuracyBannerVisible(true);
+    setMyProfile(defaultMyProfile);
+    setPartnerProfile(defaultPartnerProfile);
+    setInviteCode('');
+    setCoupleId(null);
+    setTrainingResult(null);
+    setRawKakaoText(null);
+    setChatStyleProfile(DEFAULT_CHAT_STYLE_PROFILE);
+    setPrivacyLevel(3);
+    setDateCourses(MOCK_COURSES);
+    setTriggerAddCourse(false);
+    setHasCompletedInterview(false);
+    setWeeklyMetrics({ currentScore: 65, prevScore: 62, partnerScore: 52, weeklyMessageCount: 145, avgReplyTimeMin: 7 });
+    setPartnerAiMood(FALLBACK_MOOD_TAGS);
+    setIsEarlyDatingMode(false);
+    setRoomEarlyModeState({});
+    setPartnerSensitiveConfig(DEFAULT_PARTNER_SENSITIVE_CONFIG);
+    setWeeklyReportData(null);
+    setCoupleInfoState({ startedAt: '2024-01-14' });
+    setUploadedMediaCount(0);
+    setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+  };
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
 
@@ -387,6 +417,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addUploadedMedia,
         subscriptionStatus,
         setSubscriptionStatus,
+        resetSession,
       }}
     >
       {children}

@@ -180,7 +180,7 @@ function ChatIndexCard({ t }: { t: ThemeTokens }) {
                         colors={t.gradientColors}
                         start={{ x: 0, y: 0.5 }}
                         end={{ x: 1, y: 0.5 }}
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                       />
                     </Animated.View>
                   ) : (
@@ -260,7 +260,7 @@ function SyncRateCard({ t }: { t: ThemeTokens }) {
               colors={t.gradientColors}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
           </Animated.View>
         </View>

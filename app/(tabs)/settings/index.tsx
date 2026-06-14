@@ -48,6 +48,10 @@ import {
   toggleServerDataIngestion,
 } from '../../../src/services/privacyService';
 import {
+  clearLocalAuthData,
+  logoutFromServer,
+} from '../../../src/services/authService';
+import {
   Colors,
   FontSize,
   FontWeight,
@@ -59,6 +63,7 @@ import {
   ThemeTokens,
 } from '../../../src/styles/theme';
 import { ThemeShop, ThemeShopEntryCard } from '../../../src/components/settings/ThemeShop';
+import { HelpCenter } from '../../../src/components/settings/HelpCenter';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -1999,7 +2004,13 @@ const acS = StyleSheet.create({
 
 // ─── Support & Legal Section ──────────────────────────────────────────────────
 
-function SupportLegalSection({ t }: { t: ThemeTokens }) {
+function SupportLegalSection({
+  t,
+  onHelpCenterPress,
+}: {
+  t: ThemeTokens;
+  onHelpCenterPress: () => void;
+}) {
   const router = useRouter();
 
   const items = [
@@ -2009,10 +2020,10 @@ function SupportLegalSection({ t }: { t: ThemeTokens }) {
       bg: 'rgba(74,222,128,0.15)',
       label: '도움말 센터',
       desc: '자주 묻는 질문 및 고객 지원',
-      external: true,
+      external: false,
       onPress: () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        Linking.openURL('https://twin.me/help').catch(() => {});
+        onHelpCenterPress();
       },
     },
     {
@@ -2066,33 +2077,62 @@ function SupportLegalSection({ t }: { t: ThemeTokens }) {
 // ─── Settings Footer ──────────────────────────────────────────────────────────
 
 function SettingsFooter({ t }: { t: ThemeTokens }) {
+  const { resetSession } = useAppContext();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
   const handleLogout = () => {
+    if (isLoggingOut) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       '로그아웃',
-      'Twin.me에서 로그아웃하시겠어요?',
+      '정말 로그아웃하시겠어요?\n연인과의 실시간 연결이 잠시 일시정지됩니다 🔑',
       [
         { text: '취소', style: 'cancel' },
-        {
-          text: '로그아웃',
-          style: 'destructive',
-          onPress: () => {
-            // TODO: clear session & navigate to splash
-          },
-        },
+        { text: '로그아웃', style: 'destructive', onPress: executeLogout },
       ],
     );
+  };
+
+  const executeLogout = async () => {
+    setIsLoggingOut(true);
+    // 1. 서버 토큰 블랙리스트 + 로컬 스토리지 소각 — 어느 쪽이 실패해도 로컬 초기화는 반드시 진행
+    await Promise.allSettled([logoutFromServer(), clearLocalAuthData()]);
+    // 2. 전역 AppContext 상태 슬레이트 클린
+    resetSession();
+    // 3. 네비게이션 히스토리를 Splash로 완전 교체 — 물리 백버튼 · 스와이프 백 차단
+    router.replace('/(auth)/splash');
   };
 
   return (
     <View style={ftS.container}>
       <Text style={[ftS.version, { color: t.textMuted }]}>Twin.me version 2.4.0</Text>
       <Pressable
-        style={({ pressed }) => [ftS.logoutBtn, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [
+          ftS.logoutBtn,
+          pressed && !isLoggingOut && { opacity: 0.7 },
+          isLoggingOut && ftS.logoutBtnPending,
+        ]}
         onPress={handleLogout}
+        disabled={isLoggingOut}
       >
-        <Text style={ftS.logoutText}>로그아웃</Text>
+        {isLoggingOut ? (
+          <ActivityIndicator size="small" color={Colors.ALERT_SIREN_RED} />
+        ) : (
+          <Text style={ftS.logoutText}>로그아웃</Text>
+        )}
       </Pressable>
+
+      {/* Full-screen dark overlay — throttles all touch input during logout transaction */}
+      <Modal visible={isLoggingOut} transparent animationType="fade" statusBarTranslucent>
+        <View style={ftS.logoutOverlay}>
+          <View style={ftS.logoutCard}>
+            <ActivityIndicator size="large" color="#7C3AED" />
+            <Text style={ftS.logoutOverlayTitle}>잠시만요...</Text>
+            <Text style={ftS.logoutOverlayDesc}>안전하게 세션을 종료하고 있어요</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2115,12 +2155,51 @@ const ftS = StyleSheet.create({
     borderColor: 'rgba(239,68,68,0.3)',
     backgroundColor: 'rgba(239,68,68,0.06)',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  logoutBtnPending: {
+    opacity: 0.5,
   },
   logoutText: {
     color: Colors.ALERT_SIREN_RED,
     fontSize: FontSize.base,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.3,
+  },
+  // Logout in-progress overlay
+  logoutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10,13,26,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoutCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+    paddingVertical: 36,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    gap: Spacing.md,
+    minWidth: 220,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  logoutOverlayTitle: {
+    color: '#E2E8F0',
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.2,
+  },
+  logoutOverlayDesc: {
+    color: '#94A3B8',
+    fontSize: FontSize.sm,
+    letterSpacing: 0.1,
   },
 });
 
@@ -2132,6 +2211,7 @@ export default function SettingsScreen() {
 
   const [privacySyncError, setPrivacySyncError] = useState(false);
   const [showThemeShop, setShowThemeShop] = useState(false);
+  const [showHelpCenter, setShowHelpCenter] = useState(false);
 
   // Auto-dismiss snackbar after 3.5 s
   useEffect(() => {
@@ -2179,7 +2259,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.sectionBlock}>
-          <SupportLegalSection t={t} />
+          <SupportLegalSection t={t} onHelpCenterPress={() => setShowHelpCenter(true)} />
         </View>
 
         <View style={styles.sectionBlock}>
@@ -2192,6 +2272,9 @@ export default function SettingsScreen() {
 
       {/* Custom theme shop modal */}
       <ThemeShop visible={showThemeShop} onClose={() => setShowThemeShop(false)} t={t} />
+
+      {/* In-app Help Center modal (Step #42) */}
+      <HelpCenter visible={showHelpCenter} onClose={() => setShowHelpCenter(false)} t={t} />
     </SafeAreaView>
   );
 }

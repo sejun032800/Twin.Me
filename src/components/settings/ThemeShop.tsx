@@ -1,5 +1,5 @@
 /**
- * ThemeShop.tsx — Step #41
+ * ThemeShop.tsx — Step #50
  * Bottom-sheet modal commerce UI for purchasable Twin.me custom skins.
  *
  * Three product tiers:
@@ -7,11 +7,14 @@
  *   aurora_dream  — Animated aurora gradient background layer
  *   retro_pixel   — Retro monospace / pixel font with terminal green skin
  *
- * Purchase flow:
- *   [소장하기] → react-native-iap requestPurchase (lazy-require, same pattern
- *               as iapService.ts) → backend ownership verify → markOwned() → applyTheme()
+ * Purchase flow (Step #50 — live IAP):
+ *   [소장하기] → initIAP() session → purchaseOneTimeProduct(sku) → verifyThemeOwnership()
+ *               → markOwned() → applyTheme()
  *   [적용하기] → instant applyTheme() (local, no re-verify needed)
  *   [현재 적용 중] → disabled, shows active indicator
+ *
+ * Sandbox mode (Expo Go / simulator):
+ *   isSandboxMode() === true → all purchases simulate success, badge shown in header.
  */
 
 import * as Haptics from 'expo-haptics';
@@ -41,6 +44,12 @@ import Animated, {
 
 import { THEME_CATALOG, useCustomTheme, type CustomThemeSpec } from '../../context/CustomThemeContext';
 import {
+  initIAP,
+  isSandboxMode,
+  purchaseOneTimeProduct,
+  verifyThemeOwnership,
+} from '../../services/iapService';
+import {
   Colors,
   FontSize,
   FontWeight,
@@ -52,73 +61,6 @@ import type { ThemeTokens } from '../../styles/theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.82;
-
-// ── IAP helpers (lazy-require mirror of iapService.ts pattern) ────────────────
-
-const OWNERSHIP_VERIFY_URL = 'https://api.twin.me/api/v1/themes/verify-ownership';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function iapModule(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('react-native-iap');
-  } catch {
-    throw new Error('IAP_NOT_AVAILABLE');
-  }
-}
-
-async function verifyThemeOwnership(sku: string, transactionId: string): Promise<boolean> {
-  try {
-    const res = await fetch(OWNERSHIP_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sku, transactionId }),
-    });
-    if (!res.ok) return false;
-    const json = (await res.json()) as { owned?: boolean };
-    return json.owned === true;
-  } catch {
-    // Backend unreachable — trust successful IAP receipt locally
-    return true;
-  }
-}
-
-async function purchaseThemeProduct(sku: string): Promise<string> {
-  const m = iapModule(); // throws IAP_NOT_AVAILABLE if not installed
-  return new Promise<string>((resolve, reject) => {
-    let settled = false;
-    function settle(fn: () => void) {
-      if (settled) return;
-      settled = true;
-      updateSub.remove();
-      errorSub.remove();
-      fn();
-    }
-
-    const updateSub = m.purchaseUpdatedListener(async (purchase: Record<string, unknown>) => {
-      if (purchase.productId !== sku) return;
-      const transactionId = (purchase.transactionId as string | undefined) ?? '';
-      try {
-        await m.finishTransaction({ purchase, isConsumable: false });
-        settle(() => resolve(transactionId));
-      } catch (err) {
-        settle(() => reject(err));
-      }
-    });
-
-    const errorSub = m.purchaseErrorListener((err: Record<string, unknown>) => {
-      if (err.code === 'E_USER_CANCELLED') {
-        const e = new Error('USER_CANCELLED') as Error & { userCancelled: boolean };
-        e.userCancelled = true;
-        settle(() => reject(e));
-      } else {
-        settle(() => reject(new Error(String(err.message ?? 'IAP_ERROR'))));
-      }
-    });
-
-    m.requestPurchase({ sku }).catch((err: unknown) => settle(() => reject(err)));
-  });
-}
 
 // ── Aurora preview animation ──────────────────────────────────────────────────
 
@@ -469,7 +411,6 @@ const tcS = StyleSheet.create({
 });
 
 // ── Apply flash overlay ───────────────────────────────────────────────────────
-// Brief full-screen flash that fires when the user taps [적용하기]
 
 function ApplyFlash({ visible }: { visible: boolean }) {
   const opacity = useSharedValue(0);
@@ -653,6 +594,35 @@ const stripS = StyleSheet.create({
   },
 });
 
+// ── Sandbox mode badge ────────────────────────────────────────────────────────
+
+function SandboxBadge() {
+  return (
+    <View style={sandboxS.badge}>
+      <Text style={sandboxS.text}>🧪 샌드박스 모드 — 구매 시뮬레이션 (EAS Build 필요)</Text>
+    </View>
+  );
+}
+
+const sandboxS = StyleSheet.create({
+  badge: {
+    marginHorizontal: Spacing.base,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,183,0,0.12)',
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,183,0,0.3)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  text: {
+    color: '#FCD34D',
+    fontSize: 10,
+    fontWeight: FontWeight.medium,
+    textAlign: 'center',
+  },
+});
+
 // ── ThemeShop (main export) ───────────────────────────────────────────────────
 
 interface ThemeShopProps {
@@ -669,6 +639,17 @@ export function ThemeShop({ visible, onClose, t }: ThemeShopProps) {
   const [snackMsg, setSnackMsg] = useState('');
   const [snackType, setSnackType] = useState<'error' | 'success'>('error');
   const [snackVisible, setSnackVisible] = useState(false);
+
+  const sandbox = isSandboxMode();
+
+  // Initialize IAP session when the sheet opens
+  useEffect(() => {
+    if (visible) {
+      initIAP().catch(() => {
+        // Sandbox mode is already set inside initIAP(); no action needed here.
+      });
+    }
+  }, [visible]);
 
   // Sheet slide animation
   const sheetTy = useSharedValue(SHEET_H);
@@ -720,29 +701,32 @@ export function ThemeShop({ visible, onClose, t }: ThemeShopProps) {
   const handlePurchase = useCallback(async (spec: CustomThemeSpec) => {
     setPurchasingId(spec.id);
     try {
-      const transactionId = await purchaseThemeProduct(spec.sku);
+      // Step 1: Native or sandbox purchase
+      const transactionId = await purchaseOneTimeProduct(spec.sku);
+
+      // Step 2: Backend ownership verification (env-var endpoint, trusts locally when unconfigured)
       const owned = await verifyThemeOwnership(spec.sku, transactionId);
+
       if (owned) {
         markOwned(spec.id);
         handleApply(spec.id);
-        showSnack(`${spec.name} 테마를 소장했어요 🎉`, 'success');
+        const label = sandbox
+          ? `[샌드박스] ${spec.name} 테마 구매 시뮬레이션 완료 🎮`
+          : `${spec.name} 테마를 소장했어요 🎉`;
+        showSnack(label, 'success');
       } else {
         showSnack('소유권 확인에 실패했습니다. 고객센터에 문의해주세요.', 'error');
       }
     } catch (err) {
       const isCancelled = (err as { userCancelled?: boolean }).userCancelled === true;
       if (!isCancelled) {
-        if ((err as Error).message === 'IAP_NOT_AVAILABLE') {
-          showSnack('인앱 결제는 EAS Build가 필요합니다. (react-native-iap)', 'error');
-        } else {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showSnack('결제가 완료되지 않았어요. 스토어 계정 상태를 확인해 주세요 💳', 'error');
-        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        showSnack('결제가 완료되지 않았어요. 스토어 계정 상태를 확인해 주세요 💳', 'error');
       }
     } finally {
       setPurchasingId(null);
     }
-  }, [markOwned, handleApply]);
+  }, [markOwned, handleApply, sandbox]);
 
   return (
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
@@ -768,6 +752,9 @@ export function ThemeShop({ visible, onClose, t }: ThemeShopProps) {
             <Text style={shopS.closeBtnText}>✕</Text>
           </Pressable>
         </View>
+
+        {/* Sandbox mode indicator */}
+        {sandbox && <SandboxBadge />}
 
         {/* Active theme indicator */}
         <ActiveThemeStrip spec={activeTheme} />

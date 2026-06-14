@@ -1,4 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
+// usePartnerPlaceReview — Step #48
+//
+// Reactive hook that wires a component to the partner's place review for a
+// specific Kakao place ID.
+//
+// Data pipeline:
+//   1. Synchronous pre-fill from existing dateCourses (zero-latency first render)
+//   2. subscribeToPartnerReview()  — fires immediately with cached value, then
+//      stays open for Supabase Realtime postgres_changes pushes
+//   3. fetchPartnerReviewAndRating() — async REST query that refreshes the cache
+//      and re-renders if the DB value differs from the cached one
+//
+// Memory safety:
+//   - The `cancelled` flag guards all async continuations from stale state.
+//   - The returned cleanup from subscribeToPartnerReview() removes the listener
+//     AND decrements the shared Supabase Realtime channel refcount, which tears
+//     down the channel automatically when no subscribers remain.
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchPartnerReviewAndRating,
   PartnerPlaceReview,
@@ -10,30 +28,24 @@ import { useAppContext } from '../context/AppContext';
 export interface UsePartnerPlaceReviewResult {
   review: PartnerPlaceReview | null;
   isLoading: boolean;
-  /** true after the user has tapped "흔적 남기기 요청하기" — prevents duplicate sends */
+  /** true after the user tapped "흔적 남기기 요청하기" — prevents duplicate sends */
   requestSent: boolean;
   requestReview: (placeName: string, partnerName: string) => Promise<void>;
 }
 
-/**
- * Reactive hook for a partner's place review.
- *
- * Resolves data through two tiers:
- *   1. In-memory store inside partnerReviewService (seeded from existing
- *      DateCourse records + real-time partner updates).
- *   2. Direct lookup inside dateCourses by kakaoPlaceId as a synchronous
- *      fallback before the async fetch resolves.
- *
- * Automatically re-fetches when placeId changes and subscribes to real-time
- * store updates for the lifetime of the component.
- */
 export function usePartnerPlaceReview(
-  placeId: string | null,
+  placeId: string | null | undefined,
 ): UsePartnerPlaceReviewResult {
-  const { dateCourses } = useAppContext();
+  const { dateCourses, coupleId } = useAppContext();
+
   const [review, setReview] = useState<PartnerPlaceReview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
+
+  // Stable ref so the subscription callback always sees the latest coupleId
+  // without needing to re-subscribe when only coupleId changes.
+  const coupleIdRef = useRef(coupleId);
+  coupleIdRef.current = coupleId;
 
   useEffect(() => {
     if (!placeId) {
@@ -44,17 +56,18 @@ export function usePartnerPlaceReview(
     }
 
     let cancelled = false;
+    setRequestSent(false);
 
-    // Synchronous pre-fill from existing dateCourses so UI never starts blank
-    const existingCourse = dateCourses.find(
+    // ── 1. Synchronous pre-fill from local dateCourses ─────────────────────────
+    const existing = dateCourses.find(
       (c) => (c as { kakaoPlaceId?: string }).kakaoPlaceId === placeId,
-    ) as { partnerRating: number; partnerReview: string } | undefined;
+    ) as { partnerRating?: number; partnerReview?: string } | undefined;
 
-    if (existingCourse && existingCourse.partnerRating > 0) {
+    if (existing && (existing.partnerRating ?? 0) > 0) {
       setReview({
         placeId,
-        rating: existingCourse.partnerRating,
-        review: existingCourse.partnerReview,
+        rating: existing.partnerRating!,
+        review: existing.partnerReview ?? '',
         updatedAt: new Date().toISOString(),
       });
       setIsLoading(false);
@@ -63,18 +76,16 @@ export function usePartnerPlaceReview(
       setIsLoading(true);
     }
 
-    setRequestSent(false);
-
-    // Subscribe to real-time store updates — fires immediately with current value
-    const unsub = subscribeToPartnerReview(placeId, (r) => {
+    // ── 2. Real-time subscription (Supabase Realtime or in-memory cache) ───────
+    const unsub = subscribeToPartnerReview(placeId, coupleId, (r) => {
       if (!cancelled) {
         setReview(r);
         setIsLoading(false);
       }
     });
 
-    // Async fetch (250 ms simulated latency) — confirms / updates the value
-    fetchPartnerReviewAndRating(placeId).then((r) => {
+    // ── 3. Async REST fetch — refreshes from Supabase if available ─────────────
+    fetchPartnerReviewAndRating(placeId, coupleId).then((r) => {
       if (!cancelled) {
         if (r) setReview(r);
         setIsLoading(false);
@@ -85,8 +96,10 @@ export function usePartnerPlaceReview(
       cancelled = true;
       unsub();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeId]);
+    // dateCourses intentionally excluded: pre-fill is only for the initial render.
+    // Realtime subscription handles ongoing updates without needing to re-subscribe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeId, coupleId]);
 
   const requestReview = useCallback(
     async (placeName: string, partnerName: string) => {

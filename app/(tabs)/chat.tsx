@@ -1426,6 +1426,7 @@ function ChatRoomView({
     roomEarlyModeMap, setRoomEarlyMode,
     myProfile, trainingResult,
     subscriptionStatus,
+    coupleId,
   } = useAppContext();
 
   // Step #40: derive deep inference flag from subscription plan
@@ -1513,9 +1514,8 @@ function ChatRoomView({
   // ── [Step #17] Realtime partner message listener ────────────────────────────
   useEffect(() => {
     if (roomType !== 'partner') return undefined;
-    // coupleId comes from AppContext.coupleProfile.id in production
-    const coupleId = 'demo-couple-id';
-    const cleanup = initChatroomRealtimeSocket(coupleId, (incoming: RealtimeIncomingMessage) => {
+    const activeCoupleId = coupleId ?? 'demo-couple-id';
+    const cleanup = initChatroomRealtimeSocket(activeCoupleId, (incoming: RealtimeIncomingMessage) => {
       addMessage({
         id: incoming.id,
         role: 'ai',
@@ -1555,7 +1555,7 @@ function ChatRoomView({
       try {
         await uploadMediaFile(asset.uri, 'image', (pct) => {
           setUploadProgressMap((prev) => new Map(prev).set(msgId, pct));
-        });
+        }, coupleId ?? undefined);
         setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
       } catch {
         Alert.alert('업로드 실패', '이미지 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
@@ -1588,7 +1588,7 @@ function ChatRoomView({
       try {
         await uploadMediaFile(asset.uri, 'video', (pct) => {
           setUploadProgressMap((prev) => new Map(prev).set(msgId, pct));
-        });
+        }, coupleId ?? undefined);
         setUploadProgressMap((prev) => { const next = new Map(prev); next.delete(msgId); return next; });
       } catch {
         Alert.alert('업로드 실패', '동영상 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');

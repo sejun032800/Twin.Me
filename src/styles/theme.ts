@@ -164,6 +164,13 @@ export const Radius = {
 
 // ─── Typography ──────────────────────────────────────────────────────────────
 
+export const FontFamily = {
+  regular:  'SpoqaHanSansNeo-Regular',
+  medium:   'SpoqaHanSansNeo-Medium',
+  bold:     'SpoqaHanSansNeo-Bold',
+  light:    'SpoqaHanSansNeo-Light',
+} as const;
+
 export const FontSize = {
   xs: 11,
   sm: 13,

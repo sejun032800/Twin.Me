@@ -27,7 +27,19 @@
       "expo-status-bar",
       "expo-web-browser",
       "expo-secure-store",
-      "react-native-iap"
+      "react-native-iap",
+      "expo-splash-screen",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/SpoqaHanSansNeo-Regular.otf",
+            "./assets/fonts/SpoqaHanSansNeo-Medium.otf",
+            "./assets/fonts/SpoqaHanSansNeo-Bold.otf",
+            "./assets/fonts/SpoqaHanSansNeo-Light.otf"
+          ]
+        }
+      ]
     ]
   }
 }

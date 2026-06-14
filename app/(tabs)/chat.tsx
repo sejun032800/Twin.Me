@@ -1425,7 +1425,11 @@ function ChatRoomView({
     isEarlyDatingMode, setIsEarlyDatingMode,
     roomEarlyModeMap, setRoomEarlyMode,
     myProfile, trainingResult,
+    subscriptionStatus,
   } = useAppContext();
+
+  // Step #40: derive deep inference flag from subscription plan
+  const isPremiumDeep = subscriptionStatus.isPremium && subscriptionStatus.planId === 'deep';
 
   // Room-level early dating mode — independent per-room, persists across room re-entry
   // because roomEarlyModeMap lives in AppContext (not in local component state).
@@ -1675,6 +1679,8 @@ function ChatRoomView({
           isRoomEarlyMode,
           privacyLevel,
           roomType: roomType === 'analyst' ? 'analyst' : 'ai',
+          // Step #40: inject deep inference flag for Deep Talk Night subscribers
+          isPremiumDeep,
         },
       );
     } catch {
@@ -1868,6 +1874,7 @@ function ChatRoomView({
           isRoomEarlyMode,
           privacyLevel,
           roomType: 'ai',
+          isPremiumDeep,
         },
       ).then((newText) => {
         setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: newText } : m)));

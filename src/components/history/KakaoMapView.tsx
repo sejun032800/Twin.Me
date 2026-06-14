@@ -24,6 +24,8 @@ interface Props {
   onMarkerPress?: (course: DateCourse) => void;
   panTarget?: { lat: number; lng: number } | null;
   courseRoute?: Array<{ latitude: number; longitude: number }>;
+  /** Real GPS coordinates of the device. When provided, renders a neon pulse marker. */
+  userLocation?: { lat: number; lng: number };
 }
 
 // ── Polyline route sync functions (Leaflet / Kakao variants) ─────────────────
@@ -358,6 +360,31 @@ function buildHTML(): string {
     * { margin:0; padding:0; box-sizing:border-box; }
     html, body { width:100%; height:100%; background:#0A0D1A; }
     #map { width:100%; height:100%; }
+    /* ── User Location Pulse Marker ── */
+    .user-loc-wrap { position:relative; width:20px; height:20px; }
+    .user-pulse-dot {
+      position:absolute; width:20px; height:20px; border-radius:50%;
+      background:radial-gradient(circle, #38BDF8 10%, #7C3AED 82%);
+      border:2.5px solid rgba(255,255,255,0.92);
+      animation:gps-dot 2.2s ease-in-out infinite;
+      z-index:2;
+    }
+    .user-pulse-ring {
+      position:absolute; top:-8px; left:-8px;
+      width:36px; height:36px; border-radius:50%;
+      background:rgba(56,189,248,0.22);
+      animation:gps-ring 2.2s ease-in-out infinite;
+      z-index:1;
+    }
+    @keyframes gps-dot {
+      0%,100% { box-shadow:0 0 6px 2px rgba(56,189,248,0.72); }
+      50% { box-shadow:0 0 18px 6px rgba(255,107,139,0.55), 0 0 0 12px rgba(56,189,248,0); }
+    }
+    @keyframes gps-ring {
+      0% { transform:scale(0.82); opacity:0.65; }
+      55% { transform:scale(1.75); opacity:0; }
+      100% { transform:scale(0.82); opacity:0; }
+    }
     .twin-popup .leaflet-popup-content-wrapper {
       background:transparent !important; border:none !important;
       box-shadow:none !important; padding:0 !important; border-radius:0 !important;
@@ -390,6 +417,7 @@ function buildHTML(): string {
     var recLayers = [];
     var coursesPolyline = null;
     var openInfo = null;
+    var userLocMarker = null;   /* GPS user-location pulse pin */
 
     function rn(obj) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch(_) {}
@@ -408,6 +436,30 @@ function buildHTML(): string {
     ${photoMarkerFn}
     ${syncRecommendedFn}
     ${syncCourseRouteFn}
+
+    /* ── User Location Pulse Pin ──────────────────────────────────────── */
+    ${isMockMode ? `
+    function syncUserLocation(lat, lng) {
+      if (userLocMarker) { map.removeLayer(userLocMarker); userLocMarker = null; }
+      if (lat === null || lat === undefined) return;
+      var icon = L.divIcon({
+        className: '',
+        html: '<div class="user-loc-wrap"><div class="user-pulse-dot"></div><div class="user-pulse-ring"></div></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userLocMarker = L.marker([lat, lng], { icon: icon, zIndexOffset: 1000 }).addTo(map);
+    }
+    ` : `
+    function syncUserLocation(lat, lng) {
+      if (userLocMarker) { userLocMarker.setMap(null); userLocMarker = null; }
+      if (lat === null || lat === undefined) return;
+      var pos = new kakao.maps.LatLng(lat, lng);
+      var content = '<div class="user-loc-wrap"><div class="user-pulse-dot"></div><div class="user-pulse-ring"></div></div>';
+      userLocMarker = new kakao.maps.CustomOverlay({ position: pos, content: content, zIndex: 20 });
+      userLocMarker.setMap(map);
+    }
+    `}
 
     function syncCourses(courses) {
       ${isMockMode ? `
@@ -446,11 +498,12 @@ function buildHTML(): string {
       var msg;
       try { msg = JSON.parse(data); } catch(_) { return; }
       var fn = function() {
-        if (msg.type === 'syncCourses')     syncCourses(msg.data);
-        if (msg.type === 'syncPhotos')      syncPhotos(msg.data);
-        if (msg.type === 'syncRecommended') syncRecommended(msg.data);
-        if (msg.type === 'syncCourseRoute') syncCourseRoute(msg.data);
-        if (msg.type === 'panTo')           panTo(msg.lat, msg.lng);
+        if (msg.type === 'syncCourses')      syncCourses(msg.data);
+        if (msg.type === 'syncPhotos')       syncPhotos(msg.data);
+        if (msg.type === 'syncRecommended')  syncRecommended(msg.data);
+        if (msg.type === 'syncCourseRoute')  syncCourseRoute(msg.data);
+        if (msg.type === 'panTo')            panTo(msg.lat, msg.lng);
+        if (msg.type === 'syncUserLocation') syncUserLocation(msg.lat, msg.lng);
       };
       if (mapReady) { try { fn(); } catch(e) {} }
       else queue.push(fn);
@@ -477,6 +530,7 @@ export default function KakaoMapView({
   onMarkerPress,
   panTarget,
   courseRoute,
+  userLocation,
 }: Props) {
   const webViewRef = useRef<WebView>(null);
 
@@ -493,6 +547,16 @@ export default function KakaoMapView({
   useEffect(() => {
     if (panTarget) post({ type: 'panTo', lat: panTarget.lat, lng: panTarget.lng });
   }, [panTarget]);
+
+  // Sync GPS user-location pin — cleared when userLocation is undefined (permission denied)
+  useEffect(() => {
+    if (userLocation) {
+      post({ type: 'syncUserLocation', lat: userLocation.lat, lng: userLocation.lng });
+    } else {
+      post({ type: 'syncUserLocation', lat: null, lng: null });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLocation?.lat, userLocation?.lng]);
 
   const handleMessage = (e: WebViewMessageEvent) => {
     try {

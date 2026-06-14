@@ -1,10 +1,13 @@
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
+  Image,
   Linking,
   Modal,
   PanResponder,
@@ -12,6 +15,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import Animated, {
@@ -27,6 +31,22 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrivacyLevel, useAppContext } from '../../../src/context/AppContext';
+import { usePremiumGate } from '../../../src/hooks/usePremiumGate';
+import {
+  deleteMemoriesPermanently,
+  fetchAILearnedMemories,
+  LearnedMemory,
+} from '../../../src/services/memoryEraserService';
+import {
+  initIAP,
+  teardownIAP,
+  purchaseSubscription,
+  type PlanId,
+} from '../../../src/services/iapService';
+import {
+  invalidateSessionTokens,
+  toggleServerDataIngestion,
+} from '../../../src/services/privacyService';
 import {
   Colors,
   FontSize,
@@ -38,6 +58,7 @@ import {
   ThemeMode,
   ThemeTokens,
 } from '../../../src/styles/theme';
+import { ThemeShop, ThemeShopEntryCard } from '../../../src/components/settings/ThemeShop';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -196,7 +217,20 @@ const PRIVACY_STAGES = [
 
 type PrivacyStage = 0 | 1 | 2;
 
-function PrivacySlider({ t }: { t: ThemeTokens }) {
+// ─── Step #36: Level Color System ────────────────────────────────────────────
+// stage 0 (Full Clone / 유연함): neon green
+// stage 1 (Optimized  / 보통  ): brand violet
+// stage 2 (Protected  / 높음  ): deep pink
+const LEVEL_COLORS: [string, string, string] = ['#4ADE80', '#7C3AED', '#EC4899'];
+
+const LEVEL_BADGE_TEXTS: [string, string, string] = [
+  '연인과 실시간 위치 및 상태를 자유롭게 공유합니다 🔓',
+  '일반적인 수준의 프라이버시 보호가 작동 중입니다 🛡️',
+  '채팅 스크린샷 캡처 방지 및 알림 상세 내용이 숨겨집니다 🔐',
+];
+
+
+function PrivacySlider({ t, onSyncError }: { t: ThemeTokens; onSyncError: () => void }) {
   const { privacyLevel, setPrivacyLevel } = useAppContext();
 
   const initialStage = (3 - privacyLevel) as PrivacyStage;
@@ -207,19 +241,43 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
   const stagePositions: [number, number, number] = [0, KNOB_TRAVEL / 2, KNOB_TRAVEL];
 
   const [stage, setStage] = useState<PrivacyStage>(initialStage);
-  const prevStage = useRef<PrivacyStage>(initialStage);
+  const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
 
-  const knobX      = useSharedValue(stagePositions[initialStage]);
-  const glowColor  = useSharedValue(initialStage / 2);
+  const prevStage      = useRef<PrivacyStage>(initialStage);
+  const dragStartStage = useRef<PrivacyStage>(initialStage);
+  const onSyncErrorRef = useRef(onSyncError);
+  useEffect(() => { onSyncErrorRef.current = onSyncError; }, [onSyncError]);
+
+  const knobX     = useSharedValue(stagePositions[initialStage]);
+  const glowColor = useSharedValue(initialStage / 2);
+  const syncPulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (syncState === 'syncing') {
+      syncPulse.value = withRepeat(
+        withSequence(
+          withTiming(0.35, { duration: 420 }),
+          withTiming(1, { duration: 420 }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      syncPulse.value = withTiming(1, { duration: 200 });
+    }
+  }, [syncState]);
 
   const desc0 = useSharedValue(initialStage === 0 ? 1 : 0);
   const desc1 = useSharedValue(initialStage === 1 ? 1 : 0);
   const desc2 = useSharedValue(initialStage === 2 ? 1 : 0);
   const descSVs = useRef([desc0, desc1, desc2]);
 
+  const currentColor = LEVEL_COLORS[stage];
+
+  // Tick haptic + local optimistic update — fires on every stage change during drag
   const changeStage = (newStage: PrivacyStage) => {
     if (newStage === prevStage.current) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     descSVs.current[prevStage.current].value = withTiming(0, { duration: 140 });
     descSVs.current[newStage].value          = withDelay(100, withTiming(1, { duration: 210 }));
     glowColor.value = withTiming(newStage / 2, { duration: 300 });
@@ -228,11 +286,49 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
     setPrivacyLevel((3 - newStage) as PrivacyLevel);
   };
 
+  // Revert all visual + global state to a known-good stage (silent — no haptic)
+  const rollbackToStage = (rollback: PrivacyStage) => {
+    const from = prevStage.current;
+    descSVs.current[from].value     = withTiming(0, { duration: 140 });
+    descSVs.current[rollback].value = withDelay(100, withTiming(1, { duration: 210 }));
+    glowColor.value = withTiming(rollback / 2, { duration: 300 });
+    knobX.value = withSpring(stagePositions[rollback], { stiffness: 320, damping: 28 });
+    prevStage.current = rollback;
+    setStage(rollback);
+    setPrivacyLevel((3 - rollback) as PrivacyLevel);
+  };
+
+  // Called once per drag gesture on release (equivalent to onSlidingComplete).
+  // Chains: pipeline gate change → session token invalidation → success badge.
+  // On any failure: hard rollback to prior stage + slide-up error snackbar.
+  const handleSlidingComplete = (completedStage: PrivacyStage, startStage: PrivacyStage) => {
+    if (completedStage === startStage) return;
+    const newLevel = (3 - completedStage) as PrivacyLevel;
+    setSyncState('syncing');
+
+    toggleServerDataIngestion(newLevel)
+      .then(() => invalidateSessionTokens(newLevel))
+      .then(() => {
+        setSyncState('success');
+        setTimeout(() => setSyncState('idle'), 3000);
+      })
+      .catch(() => {
+        setSyncState('error');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        rollbackToStage(startStage);
+        onSyncErrorRef.current();
+        setTimeout(() => setSyncState('idle'), 3500);
+      });
+  };
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant: () => { Haptics.selectionAsync(); },
+      onPanResponderGrant: () => {
+        dragStartStage.current = prevStage.current;
+        Haptics.selectionAsync();
+      },
       onPanResponderMove: (_, gs) => {
         const raw     = stagePositions[prevStage.current] + gs.dx;
         const clamped = Math.max(0, Math.min(KNOB_TRAVEL, raw));
@@ -245,10 +341,10 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
         runOnJS(changeStage)(ns);
       },
       onPanResponderRelease: () => {
-        knobX.value = withSpring(stagePositions[prevStage.current], {
-          stiffness: 320,
-          damping: 28,
-        });
+        const completedStage = prevStage.current;
+        const startStage     = dragStartStage.current;
+        knobX.value = withSpring(stagePositions[completedStage], { stiffness: 320, damping: 28 });
+        runOnJS(handleSlidingComplete)(completedStage, startStage);
       },
     }),
   ).current;
@@ -266,10 +362,28 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
   const descStyle2 = useAnimatedStyle(() => ({ opacity: descSVs.current[2].value, position: 'absolute' as const }));
   const descStyles = [descStyle0, descStyle1, descStyle2];
 
-  const currentStage = PRIVACY_STAGES[stage];
+  const syncPulseStyle = useAnimatedStyle(() => ({ opacity: syncPulse.value }));
+
+  const currentStageData = PRIVACY_STAGES[stage];
 
   return (
-    <View style={[styles.card, { backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1 }]}>
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: t.card,
+          borderColor: currentColor + '50',
+          borderWidth: 1,
+          // Neon glow shadow that reacts to current level color
+          shadowColor: currentColor,
+          shadowRadius: 14,
+          shadowOpacity: 0.22,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: 8,
+        },
+      ]}
+    >
+      {/* ── Header + Level Badge ─────────────────────────────────────── */}
       <View style={styles.cardHeader}>
         <View style={{ gap: 3 }}>
           <Text style={[styles.cardTitle, { color: t.text }]}>프라이버시 컨트롤 센터</Text>
@@ -277,13 +391,21 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
             AI 학습 데이터 수집 범위를 직접 제어하세요.
           </Text>
         </View>
-        <View style={[styles.stageBadge, { backgroundColor: currentStage.color + '22' }]}>
-          <Text style={[styles.stageBadgeText, { color: currentStage.color }]}>
-            {currentStage.badge}
+        <View style={[styles.stageBadge, { backgroundColor: currentColor + '22', borderColor: currentColor + '44', borderWidth: 1 }]}>
+          <Text style={[styles.stageBadgeText, { color: currentColor }]}>
+            {currentStageData.badge}
           </Text>
         </View>
       </View>
 
+      {/* ── Security Level Info Badge (Step #36 UI layer) ───────────── */}
+      <View style={[styles.levelInfoBadge, { backgroundColor: currentColor + '18', borderColor: currentColor + '55' }]}>
+        <Text style={[styles.levelInfoText, { color: currentColor }]}>
+          {LEVEL_BADGE_TEXTS[stage]}
+        </Text>
+      </View>
+
+      {/* ── Snap Labels ─────────────────────────────────────────────── */}
       <View style={[styles.snapLabelsRow, { marginBottom: 6 }]}>
         {PRIVACY_STAGES.map((s, i) => (
           <Pressable
@@ -291,26 +413,31 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
             style={styles.snapLabelWrap}
             onPress={() => {
               const ns = i as PrivacyStage;
+              if (ns === prevStage.current) return;
+              const prevForSnap = prevStage.current;
               knobX.value = withSpring(stagePositions[ns], { stiffness: 320, damping: 28 });
               changeStage(ns);
+              // Debounce: wait 300ms so rapid taps only fire one sync
+              setTimeout(() => handleSlidingComplete(ns, prevForSnap), 300);
             }}
           >
             <Text
               style={[
                 styles.snapLabelText,
-                { color: stage === i ? s.color : t.textMuted },
+                { color: stage === i ? LEVEL_COLORS[i as PrivacyStage] : t.textMuted },
                 stage === i && { fontWeight: FontWeight.bold },
               ]}
             >
               {s.snapLabel}
             </Text>
             {stage === i && (
-              <View style={[styles.snapDot, { backgroundColor: s.color }]} />
+              <View style={[styles.snapDot, { backgroundColor: LEVEL_COLORS[i as PrivacyStage] }]} />
             )}
           </Pressable>
         ))}
       </View>
 
+      {/* ── Slider Track ────────────────────────────────────────────── */}
       <View style={styles.sliderContainer}>
         <View
           style={[
@@ -322,9 +449,10 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
             },
           ]}
         >
+          {/* Track fill — gradient: green → violet → pink */}
           <Animated.View style={[styles.sliderFill, trackFillStyle]}>
             <LinearGradient
-              colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+              colors={[LEVEL_COLORS[0], LEVEL_COLORS[1], LEVEL_COLORS[2]]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={StyleSheet.absoluteFill}
@@ -339,29 +467,35 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
                 {
                   left: pos + KNOB_SIZE / 2 - 1,
                   backgroundColor: stage === i
-                    ? PRIVACY_STAGES[i].color
+                    ? LEVEL_COLORS[i as PrivacyStage]
                     : t.isLight ? 'rgba(120,80,100,0.25)' : 'rgba(255,255,255,0.18)',
                 },
               ]}
             />
           ))}
 
+          {/* Knob — color matches current level */}
           <Animated.View
-            style={[styles.sliderKnob, knobStyle]}
+            style={[
+              styles.sliderKnob,
+              knobStyle,
+              { shadowColor: currentColor, shadowOpacity: 0.75, shadowRadius: 14, elevation: 10 },
+            ]}
             {...panResponder.panHandlers}
           >
             <LinearGradient
-              colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+              colors={[currentColor, currentColor + 'BB']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.knobGradient}
             >
-              <Text style={styles.knobEmoji}>{currentStage.emoji}</Text>
+              <Text style={styles.knobEmoji}>{currentStageData.emoji}</Text>
             </LinearGradient>
           </Animated.View>
         </View>
       </View>
 
+      {/* ── Description Box ─────────────────────────────────────────── */}
       <View style={styles.descBox}>
         {PRIVACY_STAGES.map((s, i) => (
           <Animated.Text
@@ -374,22 +508,64 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
         <Text style={[styles.descText, { opacity: 0 }]}>{PRIVACY_STAGES[0].desc}</Text>
       </View>
 
+      {/* ── Pipeline / Sync Status Strip ────────────────────────────── */}
       <View
         style={[
           styles.pipelineStrip,
           {
-            backgroundColor: t.isLight
-              ? currentStage.color + '14'
-              : currentStage.color + '1A',
-            borderColor: currentStage.color + '40',
+            backgroundColor:
+              syncState === 'error'
+                ? 'rgba(239,68,68,0.10)'
+                : syncState === 'success'
+                ? 'rgba(124,58,237,0.18)'
+                : currentColor + '1A',
+            borderColor:
+              syncState === 'error'
+                ? 'rgba(239,68,68,0.40)'
+                : syncState === 'success'
+                ? 'rgba(124,58,237,0.55)'
+                : currentColor + '40',
+            // Neon violet glow on success
+            shadowColor: syncState === 'success' ? '#7C3AED' : 'transparent',
+            shadowRadius: syncState === 'success' ? 12 : 0,
+            shadowOpacity: syncState === 'success' ? 0.50 : 0,
+            shadowOffset: { width: 0, height: 0 },
           },
         ]}
       >
-        <Text style={{ fontSize: 13 }}>
-          {stage === 0 ? '🟢' : stage === 1 ? '🟡' : '🔴'}
-        </Text>
-        <Text style={[styles.pipelineText, { color: currentStage.color }]}>
-          {stage === 0
+        {syncState === 'syncing' ? (
+          <Animated.Text style={[{ fontSize: 13 }, syncPulseStyle]}>🛡️</Animated.Text>
+        ) : (
+          <Text style={{ fontSize: 13 }}>
+            {syncState === 'success'
+              ? '🔒'
+              : syncState === 'error'
+              ? '⚠️'
+              : stage === 0 ? '🟢' : stage === 1 ? '🟡' : '🔴'}
+          </Text>
+        )}
+        <Text
+          style={[
+            styles.pipelineText,
+            {
+              color:
+                syncState === 'error'
+                  ? '#EF4444'
+                  : syncState === 'success'
+                  ? '#7C3AED'
+                  : currentColor,
+              fontWeight:
+                syncState === 'success' ? FontWeight.bold : FontWeight.medium,
+            },
+          ]}
+        >
+          {syncState === 'syncing'
+            ? '안전한 서버 보안 게이트웨이 동기화 중...'
+            : syncState === 'success'
+            ? '서버 데이터 수집 차단 완료 🔒'
+            : syncState === 'error'
+            ? '동기화 실패 — 이전 설정으로 롤백했습니다'
+            : stage === 0
             ? '말투 학습 활성 · PII 마스킹 적용 중'
             : stage === 1
             ? '말투 학습 일시 중단 · 데이트 뮤즈 컨텍스트 수집 유지'
@@ -399,6 +575,67 @@ function PrivacySlider({ t }: { t: ThemeTokens }) {
     </View>
   );
 }
+
+// ─── Privacy Snackbar (Step #36) ─────────────────────────────────────────────
+
+function PrivacySnackbar({ visible }: { visible: boolean }) {
+  const ty      = useSharedValue(80);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      ty.value      = withSpring(0, { damping: 20, stiffness: 280 });
+      opacity.value = withTiming(1, { duration: 180 });
+    } else {
+      ty.value      = withTiming(80, { duration: 240, easing: Easing.in(Easing.quad) });
+      opacity.value = withTiming(0, { duration: 180 });
+    }
+  }, [visible]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: ty.value }],
+    opacity: opacity.value,
+  }));
+
+  return (
+    <Animated.View style={[snkS.bar, animStyle]} pointerEvents="none">
+      <Text style={snkS.icon}>🌐</Text>
+      <Text style={snkS.text}>보안 인프라 동기화에 실패했습니다. 다시 시도해 주세요 🌐</Text>
+    </Animated.View>
+  );
+}
+
+const snkS = StyleSheet.create({
+  bar: {
+    position: 'absolute',
+    bottom: TabBar.height + 16,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15,10,30,0.94)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.40)',
+    zIndex: 9999,
+    shadowColor: '#EF4444',
+    shadowRadius: 18,
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  icon: { fontSize: 18 },
+  text: {
+    flex: 1,
+    color: '#FCA5A5',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    lineHeight: 18,
+  },
+});
 
 // ─── Dissolve Particle ────────────────────────────────────────────────────────
 
@@ -436,44 +673,134 @@ function DissolveParticle({ x, y, char, delay }: { x: number; y: number; char: s
   );
 }
 
-// ─── Memory Eraser ────────────────────────────────────────────────────────────
+// ─── Memory Eraser (Step #38) ─────────────────────────────────────────────────
 
-const MEMORY_ITEMS = [
-  '말투 DNA 벡터 데이터 (3,241개 문장)',
-  '10분 인터뷰 성향 매트릭스',
-  '커플 공유 추억 아카이브 (18개)',
-  '크라이시스 중재 히스토리',
-  '데이트 코스 선호도 학습 데이터',
-];
+type ParticleItem = { id: string; x: number; y: number; char: string; delay: number };
+
+const CATEGORY_META: Record<string, { icon: string; color: string }> = {
+  tone:      { icon: '🗣️', color: '#7C3AED' },
+  interview: { icon: '🎙️', color: '#D946EF' },
+  archive:   { icon: '💞', color: '#FF6B8B' },
+  crisis:    { icon: '⚡', color: '#EF4444' },
+  date_pref: { icon: '🗺️', color: '#38BDF8' },
+  custom:    { icon: '📝', color: '#94A3B8' },
+};
+
+function formatLearnedAt(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} 학습`;
+}
 
 function MemoryEraser({ t }: { t: ThemeTokens }) {
+  const [learnedMemories, setLearnedMemories] = useState<LearnedMemory[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [dissolving, setDissolving] = useState(false);
-  const [particles, setParticles] = useState<{ id: string; x: number; y: number; char: string; delay: number }[]>([]);
-  const [done, setDone] = useState(false);
+  const [apiPending, setApiPending] = useState(false);
+  const [particles, setParticles] = useState<ParticleItem[]>([]);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
 
+  const auroraOpacity = useSharedValue(0);
   const btnScale = useSharedValue(1);
   const btnStyle = useAnimatedStyle(() => ({ transform: [{ scale: btnScale.value }] }));
+  const auroraStyle = useAnimatedStyle(() => ({ opacity: auroraOpacity.value }));
 
-  const handleDelete = () => {
-    setShowModal(false);
-    setDissolving(true);
+  useEffect(() => {
+    fetchAILearnedMemories()
+      .then((mems) => {
+        setLearnedMemories(mems);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setFetchError('기억 목록을 불러오지 못했어요. 잠시 후 다시 시도해주세요.');
+        setIsLoading(false);
+      });
+  }, []);
 
-    const chars = '세준서영기억벡터데이터학습메모리파기삭제0101'.split('');
-    const newParticles = Array.from({ length: 40 }, (_, i) => ({
-      id: String(i),
-      x: Math.random() * (SCREEN_W - 80),
-      y: Math.random() * 120,
-      char: chars[i % chars.length],
-      delay: i * 30,
-    }));
-    setParticles(newParticles);
+  const isClean = !isLoading && !fetchError && learnedMemories.length === 0;
 
-    setTimeout(() => {
-      setDissolving(false);
-      setDone(true);
-    }, 1800);
+  useEffect(() => {
+    if (isClean) {
+      auroraOpacity.value = withTiming(1, { duration: 1200 });
+    }
+  }, [isClean]);
+
+  // Auto-dismiss deletion error after 5s
+  useEffect(() => {
+    if (!deletionError) return;
+    const timer = setTimeout(() => setDeletionError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [deletionError]);
+
+  const toggleSelect = (id: string) => {
+    if (isDeleting) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
+
+  const toggleSelectAll = () => {
+    if (isDeleting) return;
+    if (selectedIds.size === learnedMemories.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(learnedMemories.map((m) => m.id)));
+    }
+  };
+
+  const handlePressDelete = () => {
+    if (selectedIds.size === 0 || isDeleting) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowModal(true);
+  };
+
+  // Called when user confirms the modal — timed to dissolve animation end
+  const executePermanentMemoryDeletion = () => {
+    setShowModal(false);
+    const targetIds = Array.from(selectedIds);
+    setIsDeleting(true);
+    setDeletionError(null);
+
+    // Phase 1: particle dissolve animation (0–700ms visible, delays push to ~1400ms)
+    setDissolving(true);
+    const chars = '세준서영기억벡터데이터학습메모리파기삭제010101'.split('');
+    setParticles(
+      Array.from({ length: 40 }, (_, i) => ({
+        id: String(i),
+        x: Math.random() * (SCREEN_W - 80),
+        y: Math.random() * 120,
+        char: chars[i % chars.length],
+        delay: i * 30,
+      })),
+    );
+
+    // Phase 2: fire API call timed to animation end
+    setTimeout(async () => {
+      setApiPending(true);
+      try {
+        await deleteMemoriesPermanently(targetIds);
+        // Success — physically purge from local state (true hard-delete confirmed)
+        setLearnedMemories((prev) => prev.filter((m) => !targetIds.includes(m.id)));
+        setSelectedIds(new Set());
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {
+        // Failure — rollback: items reappear since we never removed them optimistically
+        setDeletionError('기억을 지우는 과정에서 안개가 꼈어요 🌫️ 잠시 후 다시 파기해 주세요.');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } finally {
+        setApiPending(false);
+        setDissolving(false);
+        setIsDeleting(false);
+      }
+    }, 1400);
+  };
+
+  const canDelete = selectedIds.size > 0 && !isDeleting;
 
   return (
     <View style={[styles.dangerCard, { backgroundColor: t.card }]}>
@@ -481,57 +808,172 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
         colors={['rgba(239,68,68,0.08)', 'rgba(239,68,68,0.02)']}
         style={StyleSheet.absoluteFill}
       />
+
+      {/* ── Header ────────────────────────────────────────────────── */}
       <View style={styles.dangerHeader}>
         <View style={styles.dangerBadge}>
           <Text style={styles.dangerBadgeText}>⚠️ DANGER ZONE</Text>
         </View>
         <Text style={[styles.cardTitle, { color: t.text }]}>기억 삭제 디지털 지우개</Text>
-        <Text style={[styles.cardSub, { color: t.textSecondary }]}>AI가 학습한 모든 데이터를 벡터 DB에서 영구 파기해요.</Text>
+        <Text style={[styles.cardSub, { color: t.textSecondary }]}>
+          AI가 학습한 임베딩 벡터를 선택해 벡터 DB에서 영구 파기해요.
+        </Text>
       </View>
 
-      {dissolving ? (
+      {/* ── Body ──────────────────────────────────────────────────── */}
+      {isLoading ? (
+        <View style={meS.loadingBox}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={[meS.skeletonRow, { backgroundColor: t.cardBorder }]} />
+          ))}
+        </View>
+      ) : fetchError ? (
+        <View style={meS.infoBox}>
+          <Text style={meS.errorText}>{fetchError}</Text>
+        </View>
+      ) : isClean ? (
+        <Animated.View style={[meS.cleanBox, auroraStyle]}>
+          <LinearGradient
+            colors={['#7C3AED22', '#D946EF11', '#38BDF811']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={meS.cleanGradient}
+          >
+            <Text style={meS.cleanEmoji}>🌌</Text>
+            <Text style={meS.cleanTitle}>완전히 깨끗한 도화지 상태</Text>
+            <Text style={[meS.cleanSub, { color: t.textSecondary }]}>
+              트윈이가 나에 대해 기억하는{'\n'}깨끗한 도화지 상태입니다 🌌
+            </Text>
+          </LinearGradient>
+        </Animated.View>
+      ) : dissolving ? (
         <View style={styles.dissolveZone}>
-          {particles.map((p) => (
+          {!apiPending && particles.map((p) => (
             <DissolveParticle key={p.id} {...p} />
           ))}
-        </View>
-      ) : done ? (
-        <View style={styles.dissolveZone}>
-          <Text style={styles.doneText}>✅ 모든 AI 기억 데이터가 영구 파기되었습니다.</Text>
+          {apiPending && (
+            <View style={meS.apiPendingBox}>
+              <ActivityIndicator size="small" color="#EF4444" />
+              <Text style={meS.apiPendingText}>벡터 DB에서 임베딩 소각 중...</Text>
+            </View>
+          )}
         </View>
       ) : (
-        <View style={styles.memoryList}>
-          {MEMORY_ITEMS.map((item) => (
-            <View key={item} style={styles.memoryRow}>
-              <Text style={styles.memoryDot}>▪</Text>
-              <Text style={[styles.memoryItemText, { color: t.textSecondary }]}>{item}</Text>
+        <>
+          {/* Select-all header */}
+          <Pressable style={meS.selectAllRow} onPress={toggleSelectAll} disabled={isDeleting}>
+            <View style={[
+              meS.checkbox,
+              selectedIds.size === learnedMemories.length && selectedIds.size > 0
+                ? meS.checkboxActive
+                : { borderColor: t.textMuted },
+            ]}>
+              {selectedIds.size === learnedMemories.length && selectedIds.size > 0 && (
+                <Text style={meS.checkmark}>✓</Text>
+              )}
             </View>
-          ))}
+            <Text style={[meS.selectAllText, { color: t.textSecondary }]}>
+              전체 선택 ({learnedMemories.length}개)
+            </Text>
+            {selectedIds.size > 0 && (
+              <Text style={meS.selectedCount}>{selectedIds.size}개 선택됨</Text>
+            )}
+          </Pressable>
+
+          {/* Memory item list */}
+          <View style={styles.memoryList}>
+            {learnedMemories.map((mem) => {
+              const isSelected = selectedIds.has(mem.id);
+              const meta = CATEGORY_META[mem.category] ?? CATEGORY_META.custom;
+              return (
+                <Pressable
+                  key={mem.id}
+                  style={[
+                    meS.memItemRow,
+                    {
+                      backgroundColor: isSelected ? 'rgba(239,68,68,0.10)' : 'transparent',
+                      borderColor: isSelected ? 'rgba(239,68,68,0.35)' : t.cardBorder,
+                    },
+                  ]}
+                  onPress={() => toggleSelect(mem.id)}
+                  disabled={isDeleting}
+                >
+                  <View style={[
+                    meS.checkbox,
+                    isSelected ? meS.checkboxActive : { borderColor: t.textMuted },
+                  ]}>
+                    {isSelected && <Text style={meS.checkmark}>✓</Text>}
+                  </View>
+                  <View style={[meS.catIcon, { backgroundColor: meta.color + '22' }]}>
+                    <Text style={meS.catIconText}>{meta.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={[meS.memContent, { color: t.text }]} numberOfLines={1}>
+                      {mem.content}
+                    </Text>
+                    <View style={meS.memMetaRow}>
+                      {mem.vectorCount !== undefined && (
+                        <Text style={[meS.metaTag, { color: meta.color }]}>
+                          벡터 {mem.vectorCount.toLocaleString()}개
+                        </Text>
+                      )}
+                      <Text style={[meS.metaDate, { color: t.textMuted }]}>
+                        {formatLearnedAt(mem.learnedAt)}
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      )}
+
+      {/* Deletion rollback error snackbar */}
+      {deletionError && (
+        <View style={meS.errorSnack}>
+          <Text style={meS.errorSnackText}>{deletionError}</Text>
         </View>
       )}
 
-      {!done && (
+      {/* Action button */}
+      {!isLoading && !fetchError && !isClean && (
         <Animated.View style={btnStyle}>
           <Pressable
-            style={styles.eraseButton}
-            onPressIn={() => { btnScale.value = withSpring(0.95); }}
+            style={[styles.eraseButton, !canDelete && meS.eraseButtonDisabled]}
+            onPressIn={() => {
+              if (!canDelete) return;
+              btnScale.value = withSpring(0.95);
+            }}
             onPressOut={() => { btnScale.value = withSpring(1); }}
-            onPress={() => setShowModal(true)}
+            onPress={handlePressDelete}
+            disabled={!canDelete}
           >
-            <Text style={styles.eraseButtonText}>🔥 우리의 모든 AI 기억 데이터 영구 파기</Text>
+            {isDeleting ? (
+              <Text style={[styles.eraseButtonText, { opacity: 0.7 }]}>
+                🔥 파기 처리 중...
+              </Text>
+            ) : (
+              <Text style={styles.eraseButtonText}>
+                {selectedIds.size > 0
+                  ? `🔥 선택한 기억 ${selectedIds.size}개 영구 파기`
+                  : '항목을 선택해 주세요'}
+              </Text>
+            )}
           </Pressable>
         </Animated.View>
       )}
 
+      {/* Confirmation modal */}
       <Modal visible={showModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: t.card }]}>
             <Text style={styles.modalEmoji}>🚨</Text>
             <Text style={[styles.modalTitle, { color: t.text }]}>정말로 파기하시겠어요?</Text>
             <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
-              이 작업은 되돌릴 수 없어요.{'\n'}AI가 학습한 모든 기억이 영구 삭제됩니다.
+              선택된 기억 {selectedIds.size}개를 벡터 공간에서{'\n'}완전히 소각합니다. 되돌릴 수 없어요.
             </Text>
-            <Pressable style={styles.modalConfirmBtn} onPress={handleDelete}>
+            <Pressable style={styles.modalConfirmBtn} onPress={executePermanentMemoryDeletion}>
               <Text style={styles.modalConfirmText}>🔥 영구 파기 실행</Text>
             </Pressable>
             <Pressable style={styles.modalCancelBtn} onPress={() => setShowModal(false)}>
@@ -544,11 +986,147 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
   );
 }
 
+// ─── Memory Eraser Styles ─────────────────────────────────────────────────────
+
+const meS = StyleSheet.create({
+  loadingBox: { gap: 10 },
+  skeletonRow: {
+    height: 44,
+    borderRadius: Radius.md,
+    opacity: 0.4,
+  },
+  infoBox: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.25)',
+  },
+  errorText: {
+    color: Colors.ALERT_SIREN_RED,
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+  },
+  cleanBox: {
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+  },
+  cleanGradient: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  cleanEmoji: { fontSize: 40 },
+  cleanTitle: {
+    color: '#7C3AED',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+  },
+  cleanSub: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  apiPendingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  apiPendingText: {
+    color: '#EF4444',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  selectedCount: {
+    marginLeft: 'auto',
+    color: Colors.ALERT_SIREN_RED,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxActive: {
+    backgroundColor: Colors.ALERT_SIREN_RED,
+    borderColor: Colors.ALERT_SIREN_RED,
+  },
+  checkmark: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  selectAllText: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+  },
+  memItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  catIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catIconText: { fontSize: 16 },
+  memContent: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+  },
+  memMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metaTag: {
+    fontSize: 11,
+    fontWeight: FontWeight.semibold,
+  },
+  metaDate: {
+    fontSize: 11,
+  },
+  eraseButtonDisabled: { opacity: 0.4 },
+  errorSnack: {
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.35)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  errorSnackText: {
+    color: Colors.ALERT_SIREN_RED,
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+  },
+});
+
 // ─── Subscription Store ───────────────────────────────────────────────────────
 
 const PLANS = [
   {
-    id: 'coffee',
+    id: 'coffee' as PlanId,
     name: 'Coffee Break',
     price: '₩9,900',
     period: '/월',
@@ -559,7 +1137,7 @@ const PLANS = [
     accentColor: '#38BDF8',
   },
   {
-    id: 'deep',
+    id: 'deep' as PlanId,
     name: 'Deep Talk Night',
     price: '₩29,900',
     period: '/월',
@@ -572,10 +1150,122 @@ const PLANS = [
   },
 ] as const;
 
-function PlanCard({ plan }: { plan: typeof PLANS[number] }) {
-  const [purchased, setPurchased] = useState(false);
-  const scale = useSharedValue(1);
+// ─── IAP Snackbar ─────────────────────────────────────────────────────────────
+
+function IAPSnackbar({ message, visible }: { message: string; visible: boolean }) {
+  const ty      = useSharedValue(80);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      ty.value      = withSpring(0, { damping: 20, stiffness: 280 });
+      opacity.value = withTiming(1, { duration: 180 });
+    } else {
+      ty.value      = withTiming(80, { duration: 240, easing: Easing.in(Easing.quad) });
+      opacity.value = withTiming(0, { duration: 180 });
+    }
+  }, [visible]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: ty.value }],
+    opacity: opacity.value,
+  }));
+
+  return (
+    <Animated.View style={[iapSnkS.bar, animStyle]} pointerEvents="none">
+      <Text style={iapSnkS.icon}>💳</Text>
+      <Text style={iapSnkS.text}>{message}</Text>
+    </Animated.View>
+  );
+}
+
+const iapSnkS = StyleSheet.create({
+  bar: {
+    position: 'absolute',
+    bottom: TabBar.height + 16,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15,10,30,0.96)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.45)',
+    zIndex: 9999,
+    shadowColor: '#7C3AED',
+    shadowRadius: 18,
+    shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  icon: { fontSize: 18 },
+  text: {
+    flex: 1,
+    color: '#C4B5FD',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    lineHeight: 18,
+  },
+});
+
+// ─── Button Skeleton Shimmer ──────────────────────────────────────────────────
+
+function BuyButtonSkeleton() {
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 700, easing: Easing.inOut(Easing.sin) }),
+        withTiming(0, { duration: 700, easing: Easing.inOut(Easing.sin) }),
+      ),
+      -1,
+      false,
+    );
+  }, []);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: 0.45 + pulse.value * 0.35,
+  }));
+
+  return (
+    <View style={styles.buyGradient}>
+      <Animated.View style={[skeletonS.row, pulseStyle]}>
+        <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
+        <Text style={skeletonS.text}>결제 처리 중...</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+const skeletonS = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  text: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+  },
+});
+
+// ─── Plan Card ────────────────────────────────────────────────────────────────
+
+interface PlanCardProps {
+  plan: typeof PLANS[number];
+  purchasingPlanId: PlanId | null;
+  onPurchase: (planId: PlanId) => void;
+}
+
+function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
+  const { subscriptionStatus } = useAppContext();
+  const scale   = useSharedValue(1);
   const shimmer = useSharedValue(0);
+
+  const isThisPurchasing  = purchasingPlanId === plan.id;
+  const isAnyPurchasing   = purchasingPlanId !== null;
+  const isSubscribedToThis = subscriptionStatus.isPremium && subscriptionStatus.planId === plan.id;
 
   useEffect(() => {
     shimmer.value = withRepeat(
@@ -588,37 +1278,54 @@ function PlanCard({ plan }: { plan: typeof PLANS[number] }) {
     );
   }, []);
 
+  // Aurora gold-violet border pulses faster when actively purchasing
+  const auroraShimmer = useSharedValue(0);
+  useEffect(() => {
+    if (isThisPurchasing) {
+      auroraShimmer.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 500, easing: Easing.inOut(Easing.sin) }),
+          withTiming(0, { duration: 500, easing: Easing.inOut(Easing.sin) }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      auroraShimmer.value = withTiming(0, { duration: 300 });
+    }
+  }, [isThisPurchasing]);
+
   const cardStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
   const borderStyle = useAnimatedStyle(() => ({
-    opacity: 0.5 + shimmer.value * 0.5,
+    opacity: isSubscribedToThis
+      ? 0.9 + auroraShimmer.value * 0.1   // bright, steady when subscribed
+      : 0.5 + shimmer.value * 0.5,
   }));
 
   const handleBuy = () => {
+    if (isAnyPurchasing || isSubscribedToThis) return;
+
     scale.value = withSequence(
       withTiming(0.94, { duration: 60, easing: Easing.out(Easing.quad) }),
       withSpring(1, { damping: 14, stiffness: 800 }),
     );
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setTimeout(() => {
-      Alert.alert(
-        `${plan.emoji} ${plan.name}`,
-        `월 ${plan.price} 구독 결제창으로 연결됩니다.\n\n(시뮬레이션 모드)`,
-        [
-          { text: '취소', style: 'cancel' },
-          { text: '결제하기', onPress: () => setPurchased(true) },
-        ]
-      );
-    }, 150);
+    onPurchase(plan.id);
   };
+
+  // Aurora border: violet-gold on success, standard violet-pink otherwise
+  const borderColors: readonly [string, string, string] = isSubscribedToThis
+    ? (['#7C3AED', '#D946EF', '#F59E0B'] as const)
+    : (['#7C3AED', '#D946EF', '#FF6B8B'] as const);
 
   return (
     <Animated.View style={[styles.planCardWrapper, cardStyle]}>
       <Animated.View style={[StyleSheet.absoluteFill, borderStyle]}>
         <LinearGradient
-          colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+          colors={borderColors}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.planCardBorderGlow}
@@ -634,6 +1341,17 @@ function PlanCard({ plan }: { plan: typeof PLANS[number] }) {
             style={styles.featuredBadge}
           >
             <Text style={styles.featuredText}>✨ BEST</Text>
+          </LinearGradient>
+        )}
+
+        {isSubscribedToThis && (
+          <LinearGradient
+            colors={['#7C3AED', '#F59E0B']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.featuredBadge}
+          >
+            <Text style={styles.featuredText}>💎 구독 활성화됨</Text>
           </LinearGradient>
         )}
 
@@ -659,28 +1377,64 @@ function PlanCard({ plan }: { plan: typeof PLANS[number] }) {
         </View>
 
         <Pressable
-          style={[styles.buyButton, purchased && styles.buyButtonDone]}
+          style={[
+            styles.buyButton,
+            (isSubscribedToThis || (isAnyPurchasing && !isThisPurchasing)) && styles.buyButtonDone,
+          ]}
           onPress={handleBuy}
-          disabled={purchased}
+          disabled={isAnyPurchasing || isSubscribedToThis}
         >
-          <LinearGradient
-            colors={purchased ? ['#1E293B', '#1E293B'] : ['#7C3AED', '#D946EF', '#FF6B8B']}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={styles.buyGradient}
-          >
-            <Text style={styles.buyText}>
-              {purchased ? '✅ 구독 중' : '구독 시작하기'}
-            </Text>
-          </LinearGradient>
+          {isThisPurchasing ? (
+            <LinearGradient
+              colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.buyGradient}
+            >
+              <BuyButtonSkeleton />
+            </LinearGradient>
+          ) : (
+            <LinearGradient
+              colors={
+                isSubscribedToThis
+                  ? (['#7C3AED', '#F59E0B'] as const)
+                  : (['#7C3AED', '#D946EF', '#FF6B8B'] as const)
+              }
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.buyGradient}
+            >
+              <Text style={styles.buyText}>
+                {isSubscribedToThis ? '✅ 구독 중' : '구독 시작하기'}
+              </Text>
+            </LinearGradient>
+          )}
         </Pressable>
       </LinearGradient>
     </Animated.View>
   );
 }
 
+// ─── Subscription Store container ─────────────────────────────────────────────
+
 function SubscriptionStore() {
+  const { setSubscriptionStatus } = useAppContext();
+
+  const [purchasingPlanId, setPurchasingPlanId] = useState<PlanId | null>(null);
+  const [snackbarMsg, setSnackbarMsg]           = useState('');
+  const [snackbarVisible, setSnackbarVisible]   = useState(false);
+
   const breathProgress = useSharedValue(0);
+
+  // Initialize IAP connection when the store section mounts
+  useEffect(() => {
+    initIAP().catch(() => {
+      // Fails silently in simulators / dev without native build
+    });
+    return () => {
+      teardownIAP();
+    };
+  }, []);
 
   useEffect(() => {
     breathProgress.value = withRepeat(
@@ -696,6 +1450,29 @@ function SubscriptionStore() {
   const bannerStyle = useAnimatedStyle(() => ({
     opacity: 0.8 + breathProgress.value * 0.2,
   }));
+
+  function showSnackbar(msg: string) {
+    setSnackbarMsg(msg);
+    setSnackbarVisible(true);
+    setTimeout(() => setSnackbarVisible(false), 3200);
+  }
+
+  const handlePurchase = async (planId: PlanId) => {
+    setPurchasingPlanId(planId);
+    try {
+      const status = await purchaseSubscription(planId);
+      setSubscriptionStatus(status);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      const isCancelled = (err as { userCancelled?: boolean }).userCancelled === true;
+      if (!isCancelled) {
+        showSnackbar('결제가 완료되지 않았어요. 스토어 계정 상태를 확인해 주세요 💳');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+    } finally {
+      setPurchasingPlanId(null);
+    }
+  };
 
   return (
     <View style={styles.storeSection}>
@@ -716,35 +1493,342 @@ function SubscriptionStore() {
 
       <View style={styles.planList}>
         {PLANS.map((plan) => (
-          <PlanCard key={plan.id} plan={plan} />
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            purchasingPlanId={purchasingPlanId}
+            onPurchase={handlePurchase}
+          />
         ))}
       </View>
+
+      <IAPSnackbar message={snackbarMsg} visible={snackbarVisible} />
     </View>
   );
 }
+
+// ─── Luxury Particle Aura (Step #40) ─────────────────────────────────────────
+// Gold/violet sparkle particles that float & pulse around the profile card
+// when the user has an active premium subscription.
+
+const PARTICLE_DEFS = [
+  { x: 52, y: 8,  size: 5, color: '#F59E0B', delay: 0,    duration: 1800 },
+  { x: 80, y: 44, size: 4, color: '#7C3AED', delay: 300,  duration: 2200 },
+  { x: 20, y: 22, size: 3, color: '#D946EF', delay: 600,  duration: 1600 },
+  { x: 38, y: 62, size: 4, color: '#F59E0B', delay: 900,  duration: 2000 },
+  { x: 14, y: 48, size: 3, color: '#FF6B8B', delay: 450,  duration: 1900 },
+  { x: 65, y: 18, size: 5, color: '#D946EF', delay: 150,  duration: 2100 },
+] as const;
+
+function LuxuryParticleAura({ visible }: { visible: boolean }) {
+  const particles = PARTICLE_DEFS.map((def, i) => {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const scale = useSharedValue(0.4);
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const opacity = useSharedValue(0);
+
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useEffect(() => {
+      if (!visible) {
+        scale.value = withTiming(0.4, { duration: 300 });
+        opacity.value = withTiming(0, { duration: 300 });
+        return;
+      }
+      const startDelay = def.delay;
+      opacity.value = withDelay(
+        startDelay,
+        withRepeat(
+          withSequence(
+            withTiming(0.85, { duration: def.duration * 0.45 }),
+            withTiming(0.2, { duration: def.duration * 0.55 }),
+          ),
+          -1,
+          false,
+        ),
+      );
+      scale.value = withDelay(
+        startDelay,
+        withRepeat(
+          withSequence(
+            withTiming(1.2, { duration: def.duration * 0.45 }),
+            withTiming(0.6, { duration: def.duration * 0.55 }),
+          ),
+          -1,
+          false,
+        ),
+      );
+    }, [visible]);
+
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const animStyle = useAnimatedStyle(() => ({
+      opacity: opacity.value,
+      transform: [{ scale: scale.value }],
+    }));
+
+    return (
+      <Animated.View
+        key={i}
+        style={[
+          pS.particle,
+          {
+            left: def.x,
+            top: def.y,
+            width: def.size,
+            height: def.size,
+            borderRadius: def.size / 2,
+            backgroundColor: def.color,
+            shadowColor: def.color,
+          },
+          animStyle,
+        ]}
+        pointerEvents="none"
+      />
+    );
+  });
+
+  if (!visible) return null;
+
+  return <View style={pS.container} pointerEvents="none">{particles}</View>;
+}
+
+const pS = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 96,
+    height: 80,
+    zIndex: 2,
+  },
+  particle: {
+    position: 'absolute',
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+});
 
 // ─── Profile Header ───────────────────────────────────────────────────────────
 
 function ProfileHeader({ t }: { t: ThemeTokens }) {
+  const { myProfile, setMyProfile, subscriptionStatus } = useAppContext();
+  const { isPremium, hasLuxuryUI } = usePremiumGate();
+  const displayName = myProfile?.name ?? 'Twin.me 사용자';
+
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showPermModal, setShowPermModal] = useState(false);
+
+  const avatarScale  = useSharedValue(1);
+  const auroraRotate = useSharedValue(0);
+
+  // Aurora gradient rotates continuously when premium is active
+  useEffect(() => {
+    if (isPremium) {
+      auroraRotate.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.linear }),
+        -1,
+        false,
+      );
+    } else {
+      auroraRotate.value = withTiming(0, { duration: 400 });
+    }
+  }, [isPremium]);
+
+  const avatarAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: avatarScale.value }],
+  }));
+
+  // Outer glow pulsing when premium
+  const auroraGlowStyle = useAnimatedStyle(() => ({
+    opacity: isPremium ? 0.7 + (Math.sin(auroraRotate.value * Math.PI * 2) + 1) * 0.15 : 0,
+    transform: [{ rotate: `${auroraRotate.value * 360}deg` }],
+  }));
+
+  const handleUpdateAvatar = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setShowPermModal(true);
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'] as ImagePicker.MediaType[],
+      allowsEditing: true,
+      aspect: [1, 1] as [number, number],
+      quality: 0.85,
+    });
+
+    if (result.canceled) return;
+
+    const newUri = result.assets[0].uri;
+    avatarScale.value = withSequence(
+      withTiming(0.9, { duration: 80 }),
+      withSpring(1, { damping: 14, stiffness: 500 }),
+    );
+
+    setIsUploading(true);
+    try {
+      // 실제 서비스에서는 여기서 스토리지 API에 업로드
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      setMyProfile({ ...myProfile, avatarUrl: newUri });
+      setImageLoadFailed(false);
+    } catch {
+      Alert.alert(
+        '업로드 실패',
+        '이미지를 저장하지 못했어요.\n잠시 후 다시 시도해 주세요.',
+        [{ text: '확인', style: 'default' }],
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const hasAvatar = !!myProfile?.avatarUrl && !imageLoadFailed;
+
   return (
-    <View style={styles.profileHeader}>
-      <LinearGradient
-        colors={t.gradientColors}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.profileRing}
-      >
-        <View style={[styles.profileInner, { backgroundColor: t.avatarInner }]}>
-          <Text style={styles.profileEmoji}>🙋‍♂️</Text>
+    <View style={[styles.profileHeader, { position: 'relative' }]}>
+      {/* Luxury particle aura — only visible for premium subscribers */}
+      <LuxuryParticleAura visible={hasLuxuryUI} />
+
+      <TouchableOpacity onPress={handleUpdateAvatar} activeOpacity={0.82}>
+        <Animated.View style={[styles.profileAvatarWrapper, avatarAnimStyle]}>
+          {/* Premium aurora outer glow — violet-gold rotating halo */}
+          {isPremium && (
+            <Animated.View style={[StyleSheet.absoluteFill, auroraGlowStyle, { borderRadius: 999 }]}>
+              <LinearGradient
+                colors={['#7C3AED', '#F59E0B', '#D946EF', '#7C3AED']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{ flex: 1, borderRadius: 999, margin: -4 }}
+              />
+            </Animated.View>
+          )}
+          <LinearGradient
+            colors={
+              isPremium
+                ? (['#7C3AED', '#F59E0B', '#D946EF'] as const)
+                : (['#7C3AED', '#D946EF', '#FF6B8B'] as const)
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.profileRing}
+          >
+            <View style={[styles.profileInner, { backgroundColor: hasAvatar ? 'transparent' : t.avatarInner }]}>
+              {hasAvatar ? (
+                <>
+                  <Image
+                    source={{ uri: myProfile.avatarUrl }}
+                    style={styles.profileImage}
+                    onLoadStart={() => setIsImageLoading(true)}
+                    onLoadEnd={() => setIsImageLoading(false)}
+                    onError={() => {
+                      setImageLoadFailed(true);
+                      setIsImageLoading(false);
+                    }}
+                  />
+                  {isImageLoading && (
+                    <View style={styles.profileImageOverlay}>
+                      <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11 }}>···</Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <LinearGradient
+                  colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.profilePlaceholder}
+                >
+                  <Text style={styles.profilePlaceholderIcon}>👤</Text>
+                </LinearGradient>
+              )}
+              {isUploading && (
+                <View style={styles.profileImageOverlay}>
+                  <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700', textAlign: 'center' }}>
+                    저장중{'\n'}···
+                  </Text>
+                </View>
+              )}
+            </View>
+          </LinearGradient>
+          <View style={styles.profileCamBadge}>
+            <Text style={{ fontSize: 9 }}>📷</Text>
+          </View>
+        </Animated.View>
+      </TouchableOpacity>
+
+      <View style={{ flex: 1, gap: 3 }}>
+        {/* Name row — gold shield badge appears when premium */}
+        <View style={phS.nameRow}>
+          <Text style={[styles.profileName, { color: t.text }]}>{displayName} AI 관리 센터</Text>
+          {isPremium && (
+            <LinearGradient
+              colors={['#F59E0B', '#7C3AED']}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={phS.goldBadge}
+            >
+              <Text style={phS.goldBadgeText}>💎 PRO</Text>
+            </LinearGradient>
+          )}
         </View>
-      </LinearGradient>
-      <View>
-        <Text style={[styles.profileName, { color: t.text }]}>세준 AI 관리 센터</Text>
-        <Text style={[styles.profileSub, { color: t.textSecondary }]}>마이 트윈 데이터 제어 패널</Text>
+        <Text style={[styles.profileSub, { color: t.textSecondary }]}>
+          {isPremium ? '프리미엄 플랜 구독 중 ✨' : '마이 트윈 데이터 제어 패널'}
+        </Text>
       </View>
+
+      <Modal visible={showPermModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: t.card }]}>
+            <Text style={styles.modalEmoji}>📸</Text>
+            <Text style={[styles.modalTitle, { color: t.text }]}>갤러리 접근 권한 필요</Text>
+            <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
+              프로필 사진을 바꾸려면{'\n'}갤러리 접근 권한이 필요해요 📸
+            </Text>
+            <Pressable
+              style={[styles.modalConfirmBtn, { backgroundColor: '#7C3AED' }]}
+              onPress={() => {
+                setShowPermModal(false);
+                Linking.openSettings();
+              }}
+            >
+              <Text style={styles.modalConfirmText}>설정 열기</Text>
+            </Pressable>
+            <Pressable style={styles.modalCancelBtn} onPress={() => setShowPermModal(false)}>
+              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+const phS = StyleSheet.create({
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'nowrap',
+  },
+  goldBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignSelf: 'center',
+  },
+  goldBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800' as const,
+    letterSpacing: 0.3,
+  },
+});
 
 // ─── Menu Item (Shared) ───────────────────────────────────────────────────────
 
@@ -1046,6 +2130,16 @@ export default function SettingsScreen() {
   const { themeTokens, themeMode, setThemeMode } = useAppContext();
   const t = themeTokens;
 
+  const [privacySyncError, setPrivacySyncError] = useState(false);
+  const [showThemeShop, setShowThemeShop] = useState(false);
+
+  // Auto-dismiss snackbar after 3.5 s
+  useEffect(() => {
+    if (!privacySyncError) return;
+    const timer = setTimeout(() => setPrivacySyncError(false), 3500);
+    return () => clearTimeout(timer);
+  }, [privacySyncError]);
+
   return (
     <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: t.bg }]}>
       <ScrollView
@@ -1061,8 +2155,13 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.sectionBlock}>
+          <Text style={[styles.sectionTitle, { color: t.textMuted }]}>커스텀 테마</Text>
+          <ThemeShopEntryCard t={t} onPress={() => setShowThemeShop(true)} />
+        </View>
+
+        <View style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>프라이버시</Text>
-          <PrivacySlider t={t} />
+          <PrivacySlider t={t} onSyncError={() => setPrivacySyncError(true)} />
         </View>
 
         <View style={styles.sectionBlock}>
@@ -1087,6 +2186,12 @@ export default function SettingsScreen() {
           <SettingsFooter t={t} />
         </View>
       </ScrollView>
+
+      {/* Floating error snackbar — absolute within SafeAreaView, above TabBar */}
+      <PrivacySnackbar visible={privacySyncError} />
+
+      {/* Custom theme shop modal */}
+      <ThemeShop visible={showThemeShop} onClose={() => setShowThemeShop(false)} t={t} />
     </SafeAreaView>
   );
 }
@@ -1125,6 +2230,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   profileEmoji: { fontSize: 24 },
+
+  profileAvatarWrapper: {
+    position: 'relative',
+    shadowColor: '#D946EF',
+    shadowRadius: 14,
+    shadowOpacity: 0.65,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
+  },
+  profileImage: {
+    width: 49,
+    height: 49,
+    borderRadius: 24.5,
+  },
+  profilePlaceholder: {
+    width: 49,
+    height: 49,
+    borderRadius: 24.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profilePlaceholderIcon: {
+    fontSize: 22,
+    color: '#FFF',
+  },
+  profileImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 24.5,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileCamBadge: {
+    position: 'absolute',
+    bottom: 1,
+    right: 1,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#1E293B',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   profileName: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
@@ -1172,6 +2327,20 @@ const styles = StyleSheet.create({
   stageBadgeText: {
     fontSize: FontSize.xs,
     fontWeight: FontWeight.bold,
+  },
+
+  levelInfoBadge: {
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
+    marginTop: -4,
+  },
+  levelInfoText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.medium,
+    lineHeight: 16,
+    letterSpacing: 0.1,
   },
 
   snapLabelsRow: {

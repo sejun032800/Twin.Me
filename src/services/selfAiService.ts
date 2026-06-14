@@ -45,6 +45,47 @@ export interface SelfAiContext {
   isRoomEarlyMode?: boolean;
   privacyLevel: PrivacyLevel;
   roomType?: 'ai' | 'analyst';
+  // Step #40: Deep Talk Night plan flag.
+  // When true: bypasses daily cap, injects PREMIUM_DEEP_INFERENCE block, and
+  // upgrades the LLM model/token budget for higher-quality responses.
+  isPremiumDeep?: boolean;
+}
+
+// ── Daily session cap (free tier) ─────────────────────────────────────────────
+// Free users are limited to FREE_DAILY_CAP AI turns per calendar day.
+// Deep Talk Night subscribers bypass this cap entirely.
+
+const FREE_DAILY_CAP = 15;
+let _capDay = '';
+let _capCount = 0;
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+export function getDailyCapStatus(): { remaining: number; cap: number } {
+  const today = todayKey();
+  if (_capDay !== today) return { remaining: FREE_DAILY_CAP, cap: FREE_DAILY_CAP };
+  return { remaining: Math.max(0, FREE_DAILY_CAP - _capCount), cap: FREE_DAILY_CAP };
+}
+
+function checkAndIncrementCap(isPremiumDeep: boolean): void {
+  if (isPremiumDeep) return; // Deep plan: unlimited
+
+  const today = todayKey();
+  if (_capDay !== today) {
+    _capDay = today;
+    _capCount = 0;
+  }
+
+  if (_capCount >= FREE_DAILY_CAP) {
+    const err = new Error('DAILY_CAP_REACHED') as Error & { isCapReached: boolean; remaining: 0 };
+    err.isCapReached = true;
+    err.remaining = 0;
+    throw err;
+  }
+
+  _capCount++;
 }
 
 // ── System prompt builder ─────────────────────────────────────────────────────
@@ -126,6 +167,19 @@ export function buildPersonaSystemPrompt(ctx: SelfAiContext): string {
     );
   }
 
+  // Step #40: Premium deep inference mode (Deep Talk Night plan)
+  if (ctx.isPremiumDeep) {
+    lines.push(
+      '',
+      '## [PREMIUM_DEEP_INFERENCE: use_deep_inference=true]',
+      '이 세션은 Deep Talk Night 프리미엄 구독자를 위한 초고도화 추론 모드입니다.',
+      '- 표면적 감정 패턴 분석을 넘어 심층 심리(방어기제, 애착 유형, 핵심 욕구)까지 반영하세요.',
+      '- 짧지만 통찰력 있고, 사용자의 언어 패턴과 완전히 동기화된 고품질 답변을 생성하세요.',
+      '- 상황에 따라 공감, 위트, 감성적 깊이를 정교하게 혼합해 답변의 온도를 조율하세요.',
+      '- 다음 대화 흐름을 자연스럽게 유도하는 후속 뉘앙스를 문장 끝에 심어두세요.',
+    );
+  }
+
   return lines.join('\n');
 }
 
@@ -150,11 +204,18 @@ async function callBackendProxy(
   messages: ChatHistoryItem[],
   signal: AbortSignal,
   isRoomEarlyMode?: boolean,
+  isPremiumDeep?: boolean,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/v1/ai/self-reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ systemPrompt, messages, isRoomEarlyMode: !!isRoomEarlyMode }),
+    body: JSON.stringify({
+      systemPrompt,
+      messages,
+      isRoomEarlyMode: !!isRoomEarlyMode,
+      // Step #40: backend receives deep inference flag for server-side model routing
+      use_deep_inference: !!isPremiumDeep,
+    }),
     signal,
   });
   if (!res.ok) throw new Error(`BACKEND_HTTP_${res.status}`);
@@ -163,11 +224,18 @@ async function callBackendProxy(
   return json.reply.trim();
 }
 
+// Premium deep plan uses a higher-capability model and larger token budget
+const CLAUDE_MODEL_DEEP = 'claude-sonnet-4-6';
+
 async function callClaudeDirectly(
   systemPrompt: string,
   messages: ChatHistoryItem[],
   signal: AbortSignal,
+  isPremiumDeep?: boolean,
 ): Promise<string> {
+  const model = isPremiumDeep ? CLAUDE_MODEL_DEEP : CLAUDE_MODEL;
+  const maxTokens = isPremiumDeep ? 600 : 300;
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -176,10 +244,10 @@ async function callClaudeDirectly(
       'x-api-key': ANTHROPIC_KEY,
     },
     body: JSON.stringify({
-      model: CLAUDE_MODEL,
+      model,
       system: systemPrompt,
       messages,
-      max_tokens: 300,
+      max_tokens: maxTokens,
     }),
     signal,
   });
@@ -206,6 +274,23 @@ export async function requestSelfAiLlmResponse(
   chatHistory: ChatHistoryItem[],
   ctx: SelfAiContext,
 ): Promise<string> {
+  // Step #40: enforce daily session cap before any LLM call
+  try {
+    checkAndIncrementCap(ctx.isPremiumDeep ?? false);
+  } catch (capErr) {
+    if (
+      capErr instanceof Error &&
+      'isCapReached' in capErr &&
+      (capErr as Error & { isCapReached: boolean }).isCapReached
+    ) {
+      return (
+        '오늘 하루 무료 대화 횟수(15회)를 모두 사용했어요 🌙\n' +
+        'Deep Talk Night 플랜으로 업그레이드하면 무제한으로 대화할 수 있어요! 설정 탭에서 확인해보세요 💎'
+      );
+    }
+    return FALLBACK_ERROR;
+  }
+
   const systemPrompt = buildPersonaSystemPrompt(ctx);
   const messages = capHistory([
     ...chatHistory,
@@ -220,12 +305,18 @@ export async function requestSelfAiLlmResponse(
 
     if (API_BASE) {
       reply = await withTimeout(
-        callBackendProxy(systemPrompt, messages, controller.signal, ctx.isRoomEarlyMode),
+        callBackendProxy(
+          systemPrompt,
+          messages,
+          controller.signal,
+          ctx.isRoomEarlyMode,
+          ctx.isPremiumDeep,
+        ),
         TIMEOUT_MS,
       );
     } else if (ANTHROPIC_KEY) {
       reply = await withTimeout(
-        callClaudeDirectly(systemPrompt, messages, controller.signal),
+        callClaudeDirectly(systemPrompt, messages, controller.signal, ctx.isPremiumDeep),
         TIMEOUT_MS,
       );
     } else {

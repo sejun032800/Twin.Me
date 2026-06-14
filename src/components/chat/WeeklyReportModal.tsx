@@ -13,11 +13,16 @@ import Animated, {
   interpolate,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { Colors, FontSize, FontWeight, Radius, Shadows, Spacing } from '../../styles/theme';
 import { useAppContext } from '../../context/AppContext';
+import { usePremiumGate } from '../../hooks/usePremiumGate';
 import type { WeeklyReportData, TopicItem } from '../../services/weeklyReportService';
 
 // ─── SVG helpers (web only) ────────────────────────────────────────────────────
@@ -552,6 +557,183 @@ function EmptyState() {
   );
 }
 
+// ─── Premium Report Lock Screen ───────────────────────────────────────────────
+// Shown in place of actual report sections when the user lacks report access.
+// Renders a frosted-glass blur overlay with a neon nudge card + subscribe CTA.
+
+function PremiumReportLockScreen() {
+  const router = useRouter();
+
+  const pulse = useSharedValue(0);
+  const nudgeTy = useSharedValue(18);
+  const nudgeOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 2200 }),
+        withTiming(0, { duration: 2200 }),
+      ),
+      -1,
+      false,
+    );
+    nudgeTy.value = withSpring(0, { damping: 18, stiffness: 110 });
+    nudgeOpacity.value = withTiming(1, { duration: 420 });
+  }, []);
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: 0.55 + pulse.value * 0.35,
+  }));
+
+  const nudgeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: nudgeTy.value }],
+    opacity: nudgeOpacity.value,
+  }));
+
+  return (
+    <View style={lockS.root}>
+      {/* Blurred preview — fake skeleton rows that hint at the hidden report */}
+      <View style={lockS.previewStack} pointerEvents="none">
+        {[1, 2, 3].map((i) => (
+          <View key={i} style={lockS.skeletonCard}>
+            <View style={[lockS.skeletonBar, { width: '55%', opacity: 0.4 }]} />
+            <View style={[lockS.skeletonBar, { width: '80%', opacity: 0.25 }]} />
+            <View style={[lockS.skeletonBar, { width: '65%', opacity: 0.18 }]} />
+          </View>
+        ))}
+      </View>
+
+      {/* Frosted overlay */}
+      <View style={lockS.frostedOverlay} />
+
+      {/* Breathing neon glow border */}
+      <Animated.View style={[lockS.glowBorder, glowStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+
+      {/* Nudge card — the main CTA */}
+      <Animated.View style={[lockS.nudgeCard, nudgeStyle]}>
+        <Text style={lockS.lockIcon}>🔓</Text>
+        <Text style={lockS.nudgeTitle}>
+          프리미엄 플랜으로{'\n'}연인의 속마음 분석 리포트를 열어보세요
+        </Text>
+        <Text style={lockS.nudgeSub}>
+          감정 패턴, 주간 분석, 레이더 차트까지{'\n'}완전 해제됩니다 ✨
+        </Text>
+
+        <Pressable
+          style={lockS.ctaBtn}
+          onPress={() => {
+            router.push('/(tabs)/settings' as any);
+          }}
+        >
+          <LinearGradient
+            colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={lockS.ctaBtnGrad}
+          >
+            <Text style={lockS.ctaBtnText}>구독하러 가기 →</Text>
+          </LinearGradient>
+        </Pressable>
+
+        <Text style={lockS.planHint}>☕ Coffee Break · ₩9,900/월부터</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+const lockS = StyleSheet.create({
+  root: {
+    position: 'relative',
+    minHeight: 340,
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    marginVertical: Spacing.sm,
+  },
+  previewStack: {
+    gap: Spacing.sm,
+    padding: Spacing.base,
+  },
+  skeletonCard: {
+    backgroundColor: 'rgba(30,41,59,0.45)',
+    borderRadius: Radius.lg,
+    padding: Spacing.base,
+    gap: 10,
+  },
+  skeletonBar: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  frostedOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(10,13,26,0.72)',
+  },
+  glowBorder: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: Radius.xl,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    opacity: 0,
+  },
+  nudgeCard: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    gap: Spacing.md,
+  },
+  lockIcon: {
+    fontSize: 44,
+    marginBottom: 4,
+  },
+  nudgeTitle: {
+    color: '#F1F5F9',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  nudgeSub: {
+    color: '#94A3B8',
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  ctaBtn: {
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    width: '100%',
+    marginTop: 4,
+  },
+  ctaBtnGrad: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  ctaBtnText: {
+    color: '#FFF',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.3,
+  },
+  planHint: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+    textAlign: 'center',
+  },
+});
+
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
 interface WeeklyReportModalProps {
@@ -561,6 +743,7 @@ interface WeeklyReportModalProps {
 
 export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) {
   const { weeklyReportData } = useAppContext();
+  const { hasReportAccess } = usePremiumGate();
 
   const overlayOpacity = useSharedValue(0);
   const cardTranslateY = useSharedValue(60);
@@ -653,73 +836,81 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
           contentContainerStyle={styles.scrollContent}
           bounces
         >
-          {/* Loading state */}
-          {(!r || r.isLoading) && (
-            r?.isLoading ? <LoadingSkeleton /> : <EmptyState />
-          )}
+          {/* ── Premium gate: non-subscribers see blur lock instead of real data ── */}
+          {!hasReportAccess && <PremiumReportLockScreen />}
 
-          {/* Loaded state */}
-          {r && !r.isLoading && (
+          {/* ── Report sections — only visible to subscribers ─────────────────── */}
+          {hasReportAccess && (
             <>
-              {/* Section 1: Topics */}
-              <Animated.View style={secStyle(sec1)}>
-                <SectionCard title="💬 최근 대화 주제 TOP 5">
-                  {r.topics.length > 0 ? (
-                    <View style={styles.donutRow}>
-                      <DonutChart
-                        topics={r.topics}
-                        overallScore={r.overallScore}
-                      />
-                      <TopicLegend topics={r.topics} />
-                    </View>
-                  ) : (
-                    <Text style={styles.emptyCardText}>대화 데이터 분석 중이에요</Text>
-                  )}
-                </SectionCard>
-              </Animated.View>
+              {/* Loading state */}
+              {(!r || r.isLoading) && (
+                r?.isLoading ? <LoadingSkeleton /> : <EmptyState />
+              )}
 
-              {/* Section 2: Emotion timeline */}
-              <Animated.View style={secStyle(sec2)}>
-                <SectionCard title="💓 한 주간 감정 안정 지수">
-                  <View style={styles.chartCentered}>
-                    <EmotionLineChart
-                      data={r.emotionData}
-                      labels={r.emotionLabels}
-                    />
-                  </View>
-                  <View style={styles.emotionLegendRow}>
-                    <View style={styles.emotionLegendItem}>
-                      <View style={[styles.emotionDot, { backgroundColor: '#7C3AED' }]} />
-                      <Text style={styles.emotionLegendText}>안정 구간</Text>
-                    </View>
-                    <View style={styles.emotionLegendItem}>
-                      <View style={[styles.emotionDot, { backgroundColor: '#FF6B8B' }]} />
-                      <Text style={styles.emotionLegendText}>최신 감정</Text>
-                    </View>
-                  </View>
-                </SectionCard>
-              </Animated.View>
+              {/* Loaded state */}
+              {r && !r.isLoading && (
+                <>
+                  {/* Section 1: Topics */}
+                  <Animated.View style={secStyle(sec1)}>
+                    <SectionCard title="💬 최근 대화 주제 TOP 5">
+                      {r.topics.length > 0 ? (
+                        <View style={styles.donutRow}>
+                          <DonutChart
+                            topics={r.topics}
+                            overallScore={r.overallScore}
+                          />
+                          <TopicLegend topics={r.topics} />
+                        </View>
+                      ) : (
+                        <Text style={styles.emptyCardText}>대화 데이터 분석 중이에요</Text>
+                      )}
+                    </SectionCard>
+                  </Animated.View>
 
-              {/* Section 3: Radar */}
-              <Animated.View style={secStyle(sec3)}>
-                <SectionCard title="🗺️ 관계 5차원 레이더">
-                  <View style={styles.chartCentered}>
-                    <RadarChart axes={r.radarAxes} values={r.radarValues} />
-                  </View>
-                </SectionCard>
-              </Animated.View>
+                  {/* Section 2: Emotion timeline */}
+                  <Animated.View style={secStyle(sec2)}>
+                    <SectionCard title="💓 한 주간 감정 안정 지수">
+                      <View style={styles.chartCentered}>
+                        <EmotionLineChart
+                          data={r.emotionData}
+                          labels={r.emotionLabels}
+                        />
+                      </View>
+                      <View style={styles.emotionLegendRow}>
+                        <View style={styles.emotionLegendItem}>
+                          <View style={[styles.emotionDot, { backgroundColor: '#7C3AED' }]} />
+                          <Text style={styles.emotionLegendText}>안정 구간</Text>
+                        </View>
+                        <View style={styles.emotionLegendItem}>
+                          <View style={[styles.emotionDot, { backgroundColor: '#FF6B8B' }]} />
+                          <Text style={styles.emotionLegendText}>최신 감정</Text>
+                        </View>
+                      </View>
+                    </SectionCard>
+                  </Animated.View>
 
-              {/* Section 4: Analyst comment */}
-              <Animated.View style={secStyle(sec4)}>
-                <SectionCard title="✍️ 트윈이의 감성 한줄평">
-                  <View style={styles.analystCard}>
-                    <Text style={styles.analystAvatar}>🔬</Text>
-                    <View style={styles.analystBubble}>
-                      <Text style={styles.analystText}>{r.analystComment}</Text>
-                    </View>
-                  </View>
-                </SectionCard>
-              </Animated.View>
+                  {/* Section 3: Radar */}
+                  <Animated.View style={secStyle(sec3)}>
+                    <SectionCard title="🗺️ 관계 5차원 레이더">
+                      <View style={styles.chartCentered}>
+                        <RadarChart axes={r.radarAxes} values={r.radarValues} />
+                      </View>
+                    </SectionCard>
+                  </Animated.View>
+
+                  {/* Section 4: Analyst comment */}
+                  <Animated.View style={secStyle(sec4)}>
+                    <SectionCard title="✍️ 트윈이의 감성 한줄평">
+                      <View style={styles.analystCard}>
+                        <Text style={styles.analystAvatar}>🔬</Text>
+                        <View style={styles.analystBubble}>
+                          <Text style={styles.analystText}>{r.analystComment}</Text>
+                        </View>
+                      </View>
+                    </SectionCard>
+                  </Animated.View>
+                </>
+              )}
             </>
           )}
 

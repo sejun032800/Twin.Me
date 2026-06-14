@@ -14,10 +14,15 @@ import {
 } from '../services/partnerSensitiveService';
 import type { WeeklyReportData } from '../services/weeklyReportService';
 import { seedReviewStore } from '../services/partnerReviewService';
+import {
+  type SubscriptionStatus,
+  DEFAULT_SUBSCRIPTION_STATUS,
+} from '../services/iapService';
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
 export type { WeeklyReportData };
+export type { SubscriptionStatus };
 
 export type { ChatStyleProfile };
 
@@ -82,6 +87,7 @@ export interface UserProfile {
   gender: 'M' | 'F' | 'other' | '';
   mbti: string;
   enneagram: string;
+  avatarUrl?: string;
 }
 
 export interface PartnerProfile {
@@ -173,6 +179,9 @@ interface AppContextValue {
   // Incremented by chat.tsx whenever a user successfully sends an image/video bubble.
   uploadedMediaCount: number;
   addUploadedMedia: (delta?: number) => void;
+  // IAP subscription status — updated on successful receipt verification (Step #39)
+  subscriptionStatus: SubscriptionStatus;
+  setSubscriptionStatus: (status: SubscriptionStatus) => void;
 }
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
@@ -273,6 +282,8 @@ const AppContext = createContext<AppContextValue>({
   setCoupleInfo: () => {},
   uploadedMediaCount: 0,
   addUploadedMedia: () => {},
+  subscriptionStatus: DEFAULT_SUBSCRIPTION_STATUS,
+  setSubscriptionStatus: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -297,6 +308,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [weeklyReportData, setWeeklyReportData] = useState<WeeklyReportData | null>(null);
   const [coupleInfo, setCoupleInfoState] = useState<CoupleInfo>({ startedAt: '2024-01-14' });
   const [uploadedMediaCount, setUploadedMediaCount] = useState(0);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>(DEFAULT_SUBSCRIPTION_STATUS);
   const setCoupleInfo = (info: Partial<CoupleInfo>) =>
     setCoupleInfoState((prev) => ({ ...prev, ...info }));
   const addUploadedMedia = (delta = 1) =>
@@ -373,6 +385,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCoupleInfo,
         uploadedMediaCount,
         addUploadedMedia,
+        subscriptionStatus,
+        setSubscriptionStatus,
       }}
     >
       {children}

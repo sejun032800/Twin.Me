@@ -42,6 +42,8 @@ import {
   requestDateShuttleRecommendation,
 } from '../../src/services/dateShuttleService';
 import type { ShuttleResult } from '../../src/services/dateShuttleService';
+import { useGeoLocation } from '../../src/hooks/useGeoLocation';
+import { RelationshipHelix } from '../../src/components/history/RelationshipHelix';
 import {
   FontSize,
   FontWeight,
@@ -123,7 +125,7 @@ function generateRoutePolylineSegments(
 
 // ─── Segmented Control ────────────────────────────────────────────────────────
 
-type TabKey = 'archive' | 'map';
+type TabKey = 'archive' | 'map' | 'helix';
 
 function SegmentedControl({
   active,
@@ -136,7 +138,8 @@ function SegmentedControl({
 }) {
   const tabs: { key: TabKey; label: string }[] = [
     { key: 'archive', label: '📸  추억 월' },
-    { key: 'map',     label: '🗺️  데이트 지도' },
+    { key: 'map',     label: '🗺️  지도' },
+    { key: 'helix',   label: '🧬  나선' },
   ];
 
   return (
@@ -2156,6 +2159,92 @@ const museS = StyleSheet.create({
   ctaTxt: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
 });
 
+// ─── LocationPermissionModal ──────────────────────────────────────────────────
+// Shown once when foreground location permission is denied so the user is
+// aware that Seoul fallback coords are being used instead of real GPS.
+
+function LocationPermissionModal({
+  visible,
+  onDismiss,
+}: {
+  visible: boolean;
+  onDismiss: () => void;
+}) {
+  const slideY = useSharedValue(300);
+
+  useEffect(() => {
+    slideY.value = visible
+      ? withSpring(0, { damping: 22, stiffness: 180 })
+      : withTiming(300, { duration: 240 });
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: slideY.value }] }));
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onDismiss}>
+      <Pressable style={locPermS.backdrop} onPress={onDismiss}>
+        <Animated.View style={[locPermS.card, sheetStyle]}>
+          <Pressable onPress={() => {}} style={{ flex: 1 }}>
+            <LinearGradient
+              colors={['rgba(30,41,59,0.99)', 'rgba(10,13,26,1)']}
+              style={locPermS.inner}
+            >
+              <View style={locPermS.handle} />
+              <Text style={locPermS.iconEmoji}>🗺️</Text>
+              <Text style={locPermS.title}>현재 위치를 확인할 수 없어요</Text>
+              <Text style={locPermS.body}>
+                위치 권한이 허용되지 않아 GPS를 사용할 수 없어요.{'\n\n'}
+                <Text style={locPermS.highlight}>서울 중심부</Text>를 기준으로 AI 뮤즈를 가동할게요 🗺️{'\n\n'}
+                설정 앱에서 Twin.me의 위치 권한을 허용하면{'\n'}실제 내 위치 기반 추천을 받을 수 있어요.
+              </Text>
+              <Pressable onPress={onDismiss} style={locPermS.btn}>
+                <LinearGradient
+                  colors={['#7C3AED', '#D946EF']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={locPermS.btnGrad}
+                >
+                  <Text style={locPermS.btnTxt}>알겠어요 👍</Text>
+                </LinearGradient>
+              </Pressable>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const locPermS = StyleSheet.create({
+  backdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.62)',
+    justifyContent: 'flex-end',
+  },
+  card: {
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1, borderBottomWidth: 0,
+    borderColor: 'rgba(56,189,248,0.35)',
+  },
+  inner: {
+    padding: 24, paddingBottom: 44, gap: 16, alignItems: 'center',
+  },
+  handle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(148,163,184,0.3)', marginBottom: 4,
+  },
+  iconEmoji: { fontSize: 48 },
+  title: {
+    color: '#F1F5F9', fontSize: 18, fontWeight: '700', textAlign: 'center',
+  },
+  body: {
+    color: '#94A3B8', fontSize: 14, lineHeight: 22, textAlign: 'center',
+  },
+  highlight: { color: '#38BDF8', fontWeight: '700' },
+  btn: { width: '100%', borderRadius: 16, overflow: 'hidden', marginTop: 4 },
+  btnGrad: { paddingVertical: 14, alignItems: 'center' },
+  btnTxt: { color: '#fff', fontSize: 16, fontWeight: '700' },
+});
+
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
@@ -2169,6 +2258,38 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     () => generateRoutePolylineSegments(dateCourses),
     [dateCourses],
   );
+
+  // ── GPS real-time location engine (Step #32) ──────────────────────────────
+  const geoLocation = useGeoLocation();
+
+  // Permission denial modal — shown at most once per session
+  const [showPermModal, setShowPermModal]  = useState(false);
+  const permModalShownRef                  = useRef(false);
+
+  // One-shot camera pan when the first real GPS fix arrives
+  const firstGpsPanRef = useRef(false);
+
+  useEffect(() => {
+    if (geoLocation.permission === 'denied' && !permModalShownRef.current) {
+      permModalShownRef.current = true;
+      setShowPermModal(true);
+    }
+  }, [geoLocation.permission]);
+
+  useEffect(() => {
+    // Animate map to real GPS position once on first fix — never again (user may have panned)
+    if (geoLocation.isReal && !firstGpsPanRef.current) {
+      firstGpsPanRef.current = true;
+      panMapTo(geoLocation.coords.lat, geoLocation.coords.lng);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoLocation.isReal]); // intentionally not including coords to prevent re-panning on every update
+
+  const handleRecenter = async () => {
+    // Re-acquire GPS position, then smoothly animate the map camera
+    const freshCoords = await geoLocation.recenter();
+    panMapTo(freshCoords.lat, freshCoords.lng);
+  };
 
   const [addVisible, setAddVisible]           = useState(false);
   const [currentWeather, setCurrentWeather]   = useState<WeatherData | null>(null);
@@ -2186,10 +2307,9 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   const [recommendations, setRecommendations] = useState<RecommendedPlace[] | null>(null);
   const [isLoadingAI, setIsLoadingAI]         = useState(false);
 
-  // Map center fallback for photos without GPS: use first registered course or Seoul centre
-  const mapCenter = dateCourses.length > 0
-    ? { lat: dateCourses[0].latitude, lng: dateCourses[0].longitude }
-    : { lat: 37.5512, lng: 126.9882 };
+  // Map centre — real GPS when available, Seoul centre fallback otherwise.
+  // Replaces the old dateCourses[0] heuristic so AI Muse / Weather always use the user's physical position.
+  const mapCenter = geoLocation.coords;
 
   // ── Weather fetch triggered on FAB press (Step #31) ─────────────────────
   // Fires concurrently with opening the sheet so the WeatherWidget renders
@@ -2277,7 +2397,33 @@ function DateMapView({ t }: { t: ThemeTokens }) {
           recommendedPlaces={recommendations ?? undefined}
           panTarget={mapPanTarget}
           courseRoute={courseRoute}
+          userLocation={geoLocation.isReal ? geoLocation.coords : undefined}
         />
+
+        {/* ── GPS 내 위치 버튼 (My Location FAB) — top-right inside map ── */}
+        <Pressable
+          onPress={handleRecenter}
+          style={[
+            mapV.gpsBtn,
+            !geoLocation.isReal && { opacity: 0.48 },
+          ]}
+          accessibilityLabel="내 위치로 이동"
+        >
+          <LinearGradient
+            colors={
+              geoLocation.isReal
+                ? ['rgba(56,189,248,0.22)', 'rgba(124,58,237,0.18)']
+                : ['rgba(30,41,59,0.85)', 'rgba(15,23,42,0.88)']
+            }
+            style={mapV.gpsBtnGrad}
+          >
+            {/* Neon blue GPS indicator dot */}
+            {geoLocation.isReal && (
+              <View style={mapV.gpsDot} />
+            )}
+            <Text style={mapV.gpsBtnIcon}>◎</Text>
+          </LinearGradient>
+        </Pressable>
 
         {/* Star particle loading overlay */}
         {isLoadingAI && <StarParticleOverlay />}
@@ -2441,6 +2587,12 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         partnerName={partnerProfile.name}
         onPlaceSelected={panMapTo}
       />
+
+      {/* GPS permission denial guide modal — shown once when user denies location access */}
+      <LocationPermissionModal
+        visible={showPermModal}
+        onDismiss={() => setShowPermModal(false)}
+      />
     </View>
   );
 }
@@ -2451,6 +2603,49 @@ const mapV = StyleSheet.create({
     overflow: 'hidden',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(124,58,237,0.22)',
+  },
+  // ── GPS My-Location FAB (inside map canvas, top-right) ─────────────────────
+  gpsBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(56,189,248,0.45)',
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 12,
+    zIndex: 30,
+  },
+  gpsBtnGrad: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gpsBtnIcon: {
+    color: '#38BDF8',
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 22,
+  },
+  gpsDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#38BDF8',
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    elevation: 4,
   },
   // Recommendation card row floating at map bottom
   recCardRow: {
@@ -2653,6 +2848,24 @@ const archS = StyleSheet.create({
   },
 });
 
+// ─── HelixView ────────────────────────────────────────────────────────────────
+// Step #33: DNA 나선 탭 래퍼.
+// onLayout으로 실제 가용 높이를 RelationshipHelix에 전달하여 씬 중심 Y를 정확히 계산.
+
+function HelixView() {
+  const memories = useMemoryWall(7);
+  const [height, setHeight] = useState(SH * 0.68);
+
+  return (
+    <View
+      style={{ flex: 1 }}
+      onLayout={(e) => setHeight(e.nativeEvent.layout.height)}
+    >
+      <RelationshipHelix memories={memories} height={height} />
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 function HistoryScreenContent() {
@@ -2667,8 +2880,10 @@ function HistoryScreenContent() {
 
       {activeTab === 'archive' ? (
         <ArchiveView t={t} />
-      ) : (
+      ) : activeTab === 'map' ? (
         <DateMapView t={t} />
+      ) : (
+        <HelixView />
       )}
     </SafeAreaView>
   );

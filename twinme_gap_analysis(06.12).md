@@ -12,13 +12,13 @@
 | :--- | :--- | :--- | :--- |
 | 스플래시 화면 | DNA 이퀄라이저 + 로고 병합 애니메이션 | ✅ 완료 | — |
 | 온보딩 Step 1 (ingestion.tsx) | 이름·성별·MBTI·에니어그램 입력 폼 | ✅ 완료 | — |
-| ✅ 온보딩 Step 1 (ingestion.tsx) | 카카오톡 .txt 파일 업로드 기능 | ❌ 미구현 (UI Only) | 파일 선택 UI 자체가 없음. `DocumentPicker` 혹은 `expo-document-picker` 연동, 파일 바이너리 수신 파이프라인 전무. `kakaoParser.ts`의 `parseKakaoExport()` 엔진은 코드가 존재하지만 이 화면에서 단 한 번도 호출되지 않음. |
-| ✅ 온보딩 Step 1 | 처리 진행 게이지 바 ("개인정보 보호를 위해 기기 내부에서 상대방 대화 파기 중...") | ❌ 미구현 (UI Only) | 진행률 게이지 컴포넌트 자체가 없음. 파싱 비동기 처리 및 진행 상태 관리 없음. | 
-| ✅ 온보딩 Step 1 | 시그니처 드립 카드 팝업 (TOP 3 슬라이드업) | ❌ 미구현 (UI Only) | 파싱 완료 후 카드 팝업을 트리거하는 로직 없음. `parseKakaoExport()`가 반환하는 `topDrips[]`를 화면에 표시하는 코드 없음. |
-|  ✅ 온보딩 Step 2 (matching.tsx) | 초대코드 서버 DB 등록 | ❌ 미실시 (UI Only) | `generateCode()`가 클라이언트에서 순수 랜덤 생성만 함. 코드를 서버 DB에 등록하거나 사용자 계정과 묶는 API 호출 없음. |
-|✅ 온보딩 Step 2 | 상대방 초대코드 입력 폼 | ❌ 미구현 (UI Only) | 코드 발급 화면만 있고 상대방(B)이 코드를 입력해 매칭을 완료하는 화면 자체가 없음. Couple_ID 생성 및 격리 네트워크 할당 백엔드 로직 전무. |
-| ✅온보딩 Step 2 | DNA 자석 결합 애니메이션 + 햅틱 | ❌ 미구현 (UI Only) | 두 나선이 화면 좌우에서 결합되는 그래픽 일러스트와 애니메이션 없음. 매칭 성공 이벤트 자체가 없으므로 트리거 불가. |
-| ✅온보딩 Step 2 | 카카오톡 SDK 공유 (카카오 네이티브) | ❌ 미실시 | `Share.share()` (OS 기본 공유 시트)만 사용. 카카오 SDK(`@react-native-kakao/share`) 미연동. |
+| 온보딩 Step 1 (ingestion.tsx) | 카카오톡 .txt 파일 업로드 기능 | ❌ 미구현 (UI Only) | 파일 선택 UI 자체가 없음. `DocumentPicker` 혹은 `expo-document-picker` 연동, 파일 바이너리 수신 파이프라인 전무. `kakaoParser.ts`의 `parseKakaoExport()` 엔진은 코드가 존재하지만 이 화면에서 단 한 번도 호출되지 않음. |
+| 온보딩 Step 1 | 처리 진행 게이지 바 ("개인정보 보호를 위해 기기 내부에서 상대방 대화 파기 중...") | ❌ 미구현 (UI Only) | 진행률 게이지 컴포넌트 자체가 없음. 파싱 비동기 처리 및 진행 상태 관리 없음. | 
+| 온보딩 Step 1 | 시그니처 드립 카드 팝업 (TOP 3 슬라이드업) | ❌ 미구현 (UI Only) | 파싱 완료 후 카드 팝업을 트리거하는 로직 없음. `parseKakaoExport()`가 반환하는 `topDrips[]`를 화면에 표시하는 코드 없음. |
+|  온보딩 Step 2 (matching.tsx) | 초대코드 서버 DB 등록 | ❌ 미실시 (UI Only) | `generateCode()`가 클라이언트에서 순수 랜덤 생성만 함. 코드를 서버 DB에 등록하거나 사용자 계정과 묶는 API 호출 없음. |
+| 온보딩 Step 2 | 상대방 초대코드 입력 폼 | ❌ 미구현 (UI Only) | 코드 발급 화면만 있고 상대방(B)이 코드를 입력해 매칭을 완료하는 화면 자체가 없음. Couple_ID 생성 및 격리 네트워크 할당 백엔드 로직 전무. |
+| 온보딩 Step 2 | DNA 자석 결합 애니메이션 + 햅틱 | ❌ 미구현 (UI Only) | 두 나선이 화면 좌우에서 결합되는 그래픽 일러스트와 애니메이션 없음. 매칭 성공 이벤트 자체가 없으므로 트리거 불가. |
+| 온보딩 Step 2 | 카카오톡 SDK 공유 (카카오 네이티브) | ❌ 미실시 | `Share.share()` (OS 기본 공유 시트)만 사용. 카카오 SDK(`@react-native-kakao/share`) 미연동. |
 // 여기까지 모음집에 옮김
 ---
 
@@ -86,9 +86,6 @@
 | 설정 - 프로필 헤더 | 이름 표시 ("사용자 AI 관리 센터") | ❌ 미실시 (UI Only) | `settings/index.tsx:743` 하드코딩. `useAppContext().myProfile.name` 미사용. |
 | 설정 - 프로필 헤더 | 프로필 아바타 사진 | ❌ 미구현 (UI Only) | `🙋‍♂️` 이모지 고정. 실제 프로필 사진 업로드/표시 없음. |
 | 설정 - 프라이버시 슬라이더 | privacyLevel 전역 상태 연동 | ✅ 완료 | AppContext.privacyLevel에 저장됨. |
-// 여기부터 프롬프트 안짬
-
-
 | 설정 - 프라이버시 슬라이더 | privacyLevel 실제 데이터 수집 차단 (백엔드) | ❌ 미실시 (부분 구현) | 슬라이더 값은 `AppContext.privacyLevel`에 저장되고 `chat.tsx`/`history.tsx` 일부 조건분기에 활용되나, 실제 서버사이드 데이터 수집 파이프라인 차단·활성화 API 없음. |
 | 설정 - 기억 삭제 지우개 | 기억 항목 목록 (학습 데이터 목록) | ❌ 미실시 (UI Only) | `settings/index.tsx:441~447` `MEMORY_ITEMS` 5개 하드코딩. 실제 벡터 DB에서 학습 항목 조회 없음. |
 | 설정 - 기억 삭제 지우개 | [🔥 영구 파기 실행] 버튼 | ❌ 미구현 (UI Only) | 확인 모달 → 파티클 dissolve 애니메이션만 실행. 벡터 DB에서 임베딩 삭제하는 API 호출 없음. |

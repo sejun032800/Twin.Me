@@ -3,7 +3,7 @@
 // three.js/expo-gl 불필요 — 기존 reanimated + gesture-handler 활용.
 // GestureHandlerRootView는 app/_layout.tsx에 이미 존재하므로 중복 래핑 불필요.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -18,6 +18,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDecay,
+  withDelay,
   withRepeat,
   withSequence,
   withSpring,
@@ -349,23 +350,158 @@ function HelixDetailModal({
   );
 }
 
+// ─── MemoryFragment (새 기억 조각 파티클) ──────────────────────────────────────
+// 새 기억이 DNA 나선에 결합될 때 발사되는 빛 파편 파티클 (8개).
+
+const FRAGMENT_DEFS = [
+  { dx: -60, dy: -80, color: '#D946EF', size: 7, delay: 0 },
+  { dx:  60, dy: -80, color: '#7C3AED', size: 5, delay: 60 },
+  { dx:  90, dy:   0, color: '#FF6B8B', size: 6, delay: 30 },
+  { dx: -90, dy:   0, color: '#38BDF8', size: 4, delay: 90 },
+  { dx: -50, dy:  70, color: '#D946EF', size: 5, delay: 45 },
+  { dx:  50, dy:  70, color: '#7C3AED', size: 7, delay: 75 },
+  { dx:   0, dy: -100, color: '#F59E0B', size: 6, delay: 15 },
+  { dx:   0, dy:  100, color: '#4ADE80', size: 4, delay: 105 },
+] as const;
+
+function MemoryFragment({
+  cx, cy, def,
+}: {
+  cx: number;
+  cy: number;
+  def: typeof FRAGMENT_DEFS[number];
+}) {
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.3);
+
+  useEffect(() => {
+    tx.value = withDelay(def.delay, withTiming(def.dx, { duration: 700, easing: Easing.out(Easing.quad) }));
+    ty.value = withDelay(def.delay, withTiming(def.dy, { duration: 700, easing: Easing.out(Easing.quad) }));
+    opacity.value = withDelay(
+      def.delay,
+      withSequence(
+        withTiming(1, { duration: 120 }),
+        withTiming(1, { duration: 400 }),
+        withTiming(0, { duration: 180 }),
+      ),
+    );
+    scale.value = withDelay(
+      def.delay,
+      withSequence(
+        withSpring(1.4, { damping: 10, stiffness: 300 }),
+        withTiming(0.4, { duration: 400 }),
+      ),
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const style = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    left: cx - def.size / 2 + tx.value,
+    top: cy - def.size / 2 + ty.value,
+    width: def.size,
+    height: def.size,
+    borderRadius: def.size / 2,
+    backgroundColor: def.color,
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+    shadowColor: def.color,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 20,
+  }));
+
+  return <Animated.View style={style} pointerEvents="none" />;
+}
+
+// ─── NewMemoryGlow ──────────────────────────────────────────────────────────────
+// 최상단 MemoryAnchor에 고정되는 네온 글로우 링 (새 기억 결합 시 1회 발광).
+
+function NewMemoryGlow({
+  cx, cy,
+}: {
+  cx: number;
+  cy: number;
+}) {
+  const scale = useSharedValue(0.6);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    scale.value = withSequence(
+      withSpring(1.8, { damping: 8, stiffness: 200 }),
+      withTiming(2.6, { duration: 600, easing: Easing.out(Easing.quad) }),
+    );
+    opacity.value = withSequence(
+      withTiming(0.9, { duration: 100 }),
+      withTiming(0.6, { duration: 300 }),
+      withTiming(0, { duration: 500 }),
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const style = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    left: cx - 28,
+    top: cy - 28,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2.5,
+    borderColor: '#D946EF',
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 20,
+    elevation: 30,
+  }));
+
+  return <Animated.View style={style} pointerEvents="none" />;
+}
+
 // ─── RelationshipHelix (공개 API) ──────────────────────────────────────────────
 export function RelationshipHelix({
   memories,
   height,
+  newMemoryCount = 0,
 }: {
   memories: MemoryNode[];
   height: number;
+  newMemoryCount?: number;
 }) {
   const azimuth = useSharedValue(0);
   const savedAz = useSharedValue(0);
   // 씬 중심 Y: 높이 변화에 반응하는 공유값 (worklet에서 직접 접근)
   const cy = useSharedValue(height * 0.48);
   const [focusedNode, setFocusedNode] = useState<MemoryNode | null>(null);
+  const [burstKey, setBurstKey] = useState(0);
+  const [showBurst, setShowBurst] = useState(false);
+  const prevCountRef = useRef(newMemoryCount);
 
   useEffect(() => {
     cy.value = height * 0.48;
   }, [height, cy]);
+
+  // Detect new memories and fire burst animation
+  useEffect(() => {
+    if (newMemoryCount > prevCountRef.current && prevCountRef.current >= 0) {
+      prevCountRef.current = newMemoryCount;
+      setShowBurst(false);
+      setBurstKey((k) => k + 1);
+      // Brief delay so state update is clean before showing burst
+      const t = setTimeout(() => {
+        setShowBurst(true);
+        // Auto-hide after animation completes (~900ms)
+        setTimeout(() => setShowBurst(false), 950);
+      }, 50);
+      return () => clearTimeout(t);
+    }
+    prevCountRef.current = newMemoryCount;
+  }, [newMemoryCount]);
 
   // 마운트 시 천천히 자동 회전
   useEffect(() => {
@@ -401,6 +537,10 @@ export function RelationshipHelix({
     const frac = memories.length > 1 ? i / (memories.length - 1) : 0.5;
     return { node: m, pt: STRAND_A[Math.round(frac * N_PTS)] };
   });
+
+  // 파티클 폭발 중심 — 나선 상단 고정
+  const burstCX = CX;
+  const burstCY = height * 0.22; // 나선 상단 추정 위치
 
   return (
     <View style={[hxS.root, { height }]}>
@@ -481,6 +621,21 @@ export function RelationshipHelix({
               onPress={handlePress}
             />
           ))}
+
+          {/* 새 기억 결합 파티클 폭발 — 신규 memorySentences 추가 시 발동 */}
+          {showBurst && FRAGMENT_DEFS.map((def, i) => (
+            <MemoryFragment
+              key={`${burstKey}-frag-${i}`}
+              cx={burstCX}
+              cy={burstCY}
+              def={def}
+            />
+          ))}
+
+          {/* 새 기억 결합 네온 글로우 링 */}
+          {showBurst && (
+            <NewMemoryGlow key={`${burstKey}-glow`} cx={burstCX} cy={burstCY} />
+          )}
 
         </View>
       </GestureDetector>

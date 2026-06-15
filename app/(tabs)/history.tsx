@@ -27,7 +27,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import HistoryKakaoMapView from '../../src/components/history/KakaoMapView';
+import DateMapPlanner, { LayerFilterChips } from '../../src/components/history/DateMapPlanner';
 import { KakaoPlace, searchPlacesByKeyword } from '../../src/services/kakaoService';
+import { calculateNextCourseCandidates, CandidatePlace } from '../../src/utils/courseRecommendation';
+// BudgetRange used via inline object — no explicit import needed
 import { requestMuseCourse } from '../../src/services/aiMuseService';
 import { fetchCurrentWeather } from '../../src/services/weatherService';
 import type { WeatherData } from '../../src/services/weatherService';
@@ -2248,9 +2251,100 @@ const locPermS = StyleSheet.create({
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
-  const { dateCourses, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse } = useAppContext();
+  const { dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse } = useAppContext();
   const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
   const { pickPhoto } = usePhotoMetadata();
+
+  // ── Layer filter state ─────────────────────────────────────────────────────
+  // Layer 1 (pending): upcoming courses with no rating yet → neon pink pins
+  // Layer 2 (archive): visited courses with at least one rating  → purple pins
+  const [layerPending, setLayerPending] = useState(true);
+  const [layerArchive, setLayerArchive] = useState(false);
+
+  const filteredCourses = useMemo(() => {
+    return dateCourses.filter((c) => {
+      const isPending = c.myRating === 0 && c.partnerRating === 0;
+      return isPending ? layerPending : layerArchive;
+    });
+  }, [dateCourses, layerPending, layerArchive]);
+
+  // ── Planner state ──────────────────────────────────────────────────────────
+  const [plannerVisible, setPlannerVisible] = useState(false);
+  const [plannerAnchor, setPlannerAnchor] = useState<DateCourse | null>(null);
+  const [plannerSlots, setPlannerSlots] = useState<DateCourse[]>([]);
+  const [candidates, setCandidates] = useState<CandidatePlace[]>([]);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
+
+  // ── Budget filter state ────────────────────────────────────────────────────
+  const [budgetRange, setBudgetRange] = useState({ min: 0, max: 300_000 });
+  const [confirmedBudgets, setConfirmedBudgets] = useState<number[]>([]);
+  const totalConfirmedBudget = confirmedBudgets.reduce((s, b) => s + b, 0);
+
+  const fetchCandidates = async (
+    anchor: DateCourse,
+    budget: { min: number; max: number },
+  ) => {
+    setIsLoadingCandidates(true);
+    setCandidates([]);
+    try {
+      const result = await calculateNextCourseCandidates(anchor, undefined, budget);
+      setCandidates(result);
+    } finally {
+      setIsLoadingCandidates(false);
+    }
+  };
+
+  const handleSetAnchor = (anchor: DateCourse) => {
+    setPlannerAnchor(anchor);
+    setPlannerSlots([anchor]);
+    setConfirmedBudgets([]);
+    setPlannerVisible(true);
+    fetchCandidates(anchor, budgetRange);
+  };
+
+  const handleBudgetChange = (min: number, max: number) => {
+    const next = { min, max };
+    setBudgetRange(next);
+    if (plannerAnchor) {
+      fetchCandidates(plannerAnchor, next);
+    }
+  };
+
+  const handleMapLongPress = (lat: number, lng: number) => {
+    const today = new Date().toISOString().split('T')[0];
+    const anchor: DateCourse = {
+      id: `longpress-${Date.now()}`,
+      title: `선택한 위치 (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+      date: today,
+      latitude: lat,
+      longitude: lng,
+      myRating: 0,
+      myReview: '',
+      partnerRating: 0,
+      partnerReview: '',
+    };
+    handleSetAnchor(anchor);
+  };
+
+  const handleCandidateConfirm = (candidate: CandidatePlace) => {
+    const today = new Date().toISOString().split('T')[0];
+    const newCourse: DateCourse = {
+      id: `planner-${candidate.id}-${Date.now()}`,
+      title: candidate.title,
+      date: today,
+      latitude: candidate.latitude,
+      longitude: candidate.longitude,
+      myRating: 0,
+      myReview: '[ 플래너 AI 추천 · 방문 예정 ]',
+      partnerRating: 0,
+      partnerReview: '',
+    };
+    addDateCourse(newCourse);
+    setPlannerSlots((prev) => [...prev, newCourse]);
+    setConfirmedBudgets((prev) => [...prev, candidate.estimatedBudget]);
+    // Chain: search next candidates from the just-confirmed course
+    fetchCandidates(newCourse, budgetRange);
+  };
 
   // Reactive coordinate chain — recomputed whenever courses are added/removed/reordered.
   // Sorted by date ASC so the Polyline traces the chronological date journey.
@@ -2391,13 +2485,22 @@ function DateMapView({ t }: { t: ThemeTokens }) {
       {/* ── Map canvas ── */}
       <View style={[mapV.mapContainer, { height: MAP_H }]}>
         <HistoryKakaoMapView
-          courses={dateCourses}
+          courses={filteredCourses}
           photos={historyPlaces}
           onMarkerPress={(c) => { setSelectedCourse(c); setRecommendations(null); }}
           recommendedPlaces={recommendations ?? undefined}
+          candidatePlaces={candidates.length > 0 ? candidates : undefined}
           panTarget={mapPanTarget}
           courseRoute={courseRoute}
           userLocation={geoLocation.isReal ? geoLocation.coords : undefined}
+          onMapLongPress={handleMapLongPress}
+        />
+
+        {/* ── Layer filter chips (top-left inside map canvas) ── */}
+        <LayerFilterChips
+          pending={layerPending}
+          archive={layerArchive}
+          onChange={(p, a) => { setLayerPending(p); setLayerArchive(a); }}
         />
 
         {/* ── GPS 내 위치 버튼 (My Location FAB) — top-right inside map ── */}
@@ -2473,10 +2576,32 @@ function DateMapView({ t }: { t: ThemeTokens }) {
               }
             </View>
           </View>
-          <Pressable style={mapV.qClose} onPress={() => setSelectedCourse(null)}>
-            <Text style={{ color: '#94A3B8', fontSize: 12 }}>닫기 ✕</Text>
-          </Pressable>
+          <View style={mapV.qActions}>
+            <Pressable
+              style={mapV.qStartPlanner}
+              onPress={() => { handleSetAnchor(selectedCourse!); setSelectedCourse(null); }}
+            >
+              <Text style={mapV.qStartPlannerTxt}>📋 여기서 코스 시작</Text>
+            </Pressable>
+            <Pressable style={mapV.qClose} onPress={() => setSelectedCourse(null)}>
+              <Text style={{ color: '#94A3B8', fontSize: 12 }}>✕</Text>
+            </Pressable>
+          </View>
         </View>
+      )}
+
+      {/* ── Planner trigger strip ── */}
+      {!recommendations && !isLoadingAI && (
+        <Pressable style={mapV.plannerTrigger} onPress={() => setPlannerVisible(true)}>
+          <LinearGradient
+            colors={['rgba(74,222,128,0.09)', 'rgba(34,211,238,0.06)']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={mapV.plannerTriggerGrad}
+          >
+            <Text style={mapV.plannerTriggerTxt}>📋 코스 플래너 열기</Text>
+            <Text style={mapV.plannerTriggerHint}>지도를 롱프레스하거나 핀을 탭해 시작</Text>
+          </LinearGradient>
+        </Pressable>
       )}
 
       {/* ── Recommendation confirm panel OR course list ── */}
@@ -2593,6 +2718,20 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         visible={showPermModal}
         onDismiss={() => setShowPermModal(false)}
       />
+
+      {/* ── Date Course Planner Bottom Sheet ── */}
+      <DateMapPlanner
+        visible={plannerVisible}
+        onClose={() => setPlannerVisible(false)}
+        anchor={plannerAnchor}
+        plannerSlots={plannerSlots}
+        candidates={candidates}
+        isLoadingCandidates={isLoadingCandidates}
+        onCandidateConfirm={handleCandidateConfirm}
+        budgetRange={budgetRange}
+        onBudgetChange={handleBudgetChange}
+        totalConfirmedBudget={totalConfirmedBudget}
+      />
     </View>
   );
 }
@@ -2705,7 +2844,36 @@ const mapV = StyleSheet.create({
   qRatings: { gap: 4, marginTop: 2 },
   qRatingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   qName: { fontSize: FontSize.xs, width: 28 },
-  qClose: { alignSelf: 'flex-end' },
+  qActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
+  qStartPlanner: {
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.35)',
+  },
+  qStartPlannerTxt: { color: '#4ADE80', fontSize: 11, fontWeight: FontWeight.bold },
+  qClose: { padding: 4 },
+  // Planner trigger strip
+  plannerTrigger: {
+    marginHorizontal: Spacing.base,
+    marginTop: 8,
+    marginBottom: 4,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+  },
+  plannerTriggerGrad: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  plannerTriggerTxt: { color: '#4ADE80', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  plannerTriggerHint: { color: '#334155', fontSize: 10 },
   listHeader: {
     fontSize: FontSize.xs,
     fontWeight: FontWeight.semibold,
@@ -2849,22 +3017,97 @@ const archS = StyleSheet.create({
 });
 
 // ─── HelixView ────────────────────────────────────────────────────────────────
-// Step #33: DNA 나선 탭 래퍼.
-// onLayout으로 실제 가용 높이를 RelationshipHelix에 전달하여 씬 중심 Y를 정확히 계산.
+// Step #33 + Step #50: DNA 나선 탭 래퍼.
+// memorySentences(AI 선별) + useMemoryWall(로컬 발렌스) 병합.
+// newMemoryCount → RelationshipHelix 파티클 Glow 트리거.
 
 function HelixView() {
-  const memories = useMemoryWall(7);
+  const valenceMemories = useMemoryWall(5);
+  const { memorySentences, themeTokens: t } = useAppContext();
   const [height, setHeight] = useState(SH * 0.68);
+
+  // AI 선별 KakaoSyncRecord → MemoryNode 변환 (상위 5개)
+  const aiMemories: import('../../src/hooks/useMemoryWall').MemoryNode[] = memorySentences
+    .slice(0, 5)
+    .map((r) => ({
+      id: `sync-${r.id}`,
+      date: r.date,
+      rawDate: new Date(r.date),
+      quote: r.coreQuote,
+      tag: '💕 AI 선별',
+      speaker: 'partner' as const,
+      valenceScore: 10,
+      imageUri: null,
+    }));
+
+  // 병합 (중복 id 제거) — AI 선별을 앞에 배치
+  const existingIds = new Set(aiMemories.map((m) => m.id));
+  const mergedMemories = [
+    ...aiMemories,
+    ...valenceMemories.filter((m) => !existingIds.has(m.id)).slice(0, 5),
+  ].slice(0, 9);
 
   return (
     <View
       style={{ flex: 1 }}
       onLayout={(e) => setHeight(e.nativeEvent.layout.height)}
     >
-      <RelationshipHelix memories={memories} height={height} />
+      <RelationshipHelix
+        memories={mergedMemories}
+        height={height}
+        newMemoryCount={memorySentences.length}
+      />
+
+      {/* 헬릭스 탭 빈 상태 안내 */}
+      {mergedMemories.length === 0 && (
+        <View style={helixEmptyS.overlay} pointerEvents="none">
+          <View style={helixEmptyS.hint}>
+            <Text style={helixEmptyS.emoji}>🧬</Text>
+            <Text style={helixEmptyS.title}>카카오톡을 학습시켜보세요</Text>
+            <Text style={[helixEmptyS.sub, { color: t.textMuted }]}>
+              채팅 탭 '+' 버튼 또는 설정 탭{'\n'}'추억 동기화' 에서 파일을 업로드하세요
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
+
+const helixEmptyS = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 60,
+  },
+  hint: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(10,13,26,0.78)',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.3)',
+  },
+  emoji: { fontSize: 32 },
+  title: {
+    color: '#F1F5F9',
+    fontSize: 15,
+    fontWeight: '700' as const,
+    textAlign: 'center',
+  },
+  sub: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 

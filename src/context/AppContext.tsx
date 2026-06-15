@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useColorScheme } from 'react-native';
 import { DARK_THEME, LIGHT_THEME, ThemeMode, ThemeTokens } from '../styles/theme';
 import {
   ChatStyleProfile,
@@ -18,6 +19,7 @@ import {
   type SubscriptionStatus,
   DEFAULT_SUBSCRIPTION_STATUS,
 } from '../services/iapService';
+import type { KakaoSyncRecord } from '../services/kakaoUploadService';
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
@@ -25,6 +27,7 @@ export type { WeeklyReportData };
 export type { SubscriptionStatus };
 
 export type { ChatStyleProfile };
+export type { KakaoSyncRecord };
 
 // ── Privacy Level ─────────────────────────────────────────────────────────────
 // 3 = 완전복제(Full Clone, default) · 2 = 최적화(Optimized) · 1 = 보호(Protected)
@@ -183,6 +186,11 @@ interface AppContextValue {
   // IAP subscription status — updated on successful receipt verification (Step #39)
   subscriptionStatus: SubscriptionStatus;
   setSubscriptionStatus: (status: SubscriptionStatus) => void;
+  // KakaoTalk incremental sync — AI-selected touching moments (Step #50)
+  memorySentences: KakaoSyncRecord[];
+  addMemorySentences: (records: KakaoSyncRecord[]) => void;
+  lastKakaoSyncTimestamp: string | null;
+  setLastKakaoSyncTimestamp: (ts: string | null) => void;
   // Resets all session state to initial defaults (Step #43 — logout pipeline)
   resetSession: () => void;
 }
@@ -287,14 +295,20 @@ const AppContext = createContext<AppContextValue>({
   addUploadedMedia: () => {},
   subscriptionStatus: DEFAULT_SUBSCRIPTION_STATUS,
   setSubscriptionStatus: () => {},
+  memorySentences: [],
+  addMemorySentences: () => {},
+  lastKakaoSyncTimestamp: null,
+  setLastKakaoSyncTimestamp: () => {},
   resetSession: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  // System colour-scheme used as initial value; manual setThemeMode overrides it.
+  const systemScheme = useColorScheme();
   const [accuracyBannerVisible, setAccuracyBannerVisible] = useState(true);
   const [myProfile, setMyProfile] = useState<UserProfile>(defaultMyProfile);
   const [partnerProfile, setPartnerProfile] = useState<PartnerProfile>(defaultPartnerProfile);
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(systemScheme === 'dark' ? 'dark' : 'light');
   const [inviteCode, setInviteCode] = useState('');
   const [coupleId, setCoupleId] = useState<string | null>(null);
   const [trainingResult, setTrainingResult] = useState<TrainingResult | null>(null);
@@ -313,12 +327,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [coupleInfo, setCoupleInfoState] = useState<CoupleInfo>({ startedAt: '2024-01-14' });
   const [uploadedMediaCount, setUploadedMediaCount] = useState(0);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>(DEFAULT_SUBSCRIPTION_STATUS);
+  const [memorySentences, setMemorySentences] = useState<KakaoSyncRecord[]>([]);
+  const [lastKakaoSyncTimestamp, setLastKakaoSyncTimestamp] = useState<string | null>(null);
   const setCoupleInfo = (info: Partial<CoupleInfo>) =>
     setCoupleInfoState((prev) => ({ ...prev, ...info }));
   const addUploadedMedia = (delta = 1) =>
     setUploadedMediaCount((prev) => prev + delta);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
     setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
+  const addMemorySentences = (records: KakaoSyncRecord[]) =>
+    setMemorySentences((prev) => {
+      const existingIds = new Set(prev.map((r) => r.id));
+      const newOnly = records.filter((r) => !existingIds.has(r.id));
+      return [...newOnly, ...prev];
+    });
 
   // Resets every state slice back to its initial default (Step #43 — logout pipeline).
   // Deliberately preserves themeMode so the display preference survives re-login.
@@ -344,6 +366,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCoupleInfoState({ startedAt: '2024-01-14' });
     setUploadedMediaCount(0);
     setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+    setMemorySentences([]);
+    setLastKakaoSyncTimestamp(null);
   };
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
@@ -417,6 +441,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addUploadedMedia,
         subscriptionStatus,
         setSubscriptionStatus,
+        memorySentences,
+        addMemorySentences,
+        lastKakaoSyncTimestamp,
+        setLastKakaoSyncTimestamp,
         resetSession,
       }}
     >

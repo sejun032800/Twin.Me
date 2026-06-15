@@ -1,3 +1,5 @@
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +13,7 @@ import {
   Linking,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -64,6 +67,7 @@ import {
 } from '../../../src/styles/theme';
 import { ThemeShop, ThemeShopEntryCard } from '../../../src/components/settings/ThemeShop';
 import { HelpCenter } from '../../../src/components/settings/HelpCenter';
+import { runKakaoSyncPipeline } from '../../../src/services/kakaoUploadService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -2074,6 +2078,210 @@ function SupportLegalSection({
   );
 }
 
+// ─── KakaoSync Section (Step #50) ─────────────────────────────────────────────
+
+function KakaoSyncSection({ t }: { t: ThemeTokens }) {
+  const { addMemorySentences, lastKakaoSyncTimestamp, setLastKakaoSyncTimestamp, memorySentences } = useAppContext();
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const syncPulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (isSyncing) {
+      syncPulse.value = withRepeat(
+        withSequence(
+          withTiming(0.35, { duration: 450 }),
+          withTiming(1, { duration: 450 }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      syncPulse.value = withTiming(1, { duration: 200 });
+    }
+  }, [isSyncing]);
+
+  const syncStyle = useAnimatedStyle(() => ({ opacity: syncPulse.value }));
+
+  const handleSyncPress = async () => {
+    if (isSyncing) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+      setIsSyncing(true);
+      setLastResult(null);
+
+      let content: string;
+      if (Platform.OS === 'web') {
+        const res = await fetch(asset.uri);
+        content = await res.text();
+      } else {
+        content = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      }
+
+      if (!content || content.trim().length === 0) {
+        setLastResult('파일이 비어 있어요. 카카오톡 .txt 파일을 선택해주세요.');
+        return;
+      }
+
+      const { newRecords, newLastTs, deltaCount } = await runKakaoSyncPipeline(
+        content,
+        lastKakaoSyncTimestamp,
+      );
+
+      if (newLastTs) setLastKakaoSyncTimestamp(newLastTs);
+
+      if (newRecords.length > 0) {
+        addMemorySentences(newRecords);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setLastResult(`✅ 신규 ${deltaCount}건 → 감동 순간 ${newRecords.length}개 추가됨`);
+      } else if (deltaCount === 0) {
+        setLastResult('✅ 이미 최신 상태 — 새 대화 없음');
+      } else {
+        setLastResult(`📊 신규 ${deltaCount}건 분석 완료 — 선별된 순간 없음`);
+      }
+    } catch {
+      setLastResult('⚠️ 파일 분석 중 오류가 발생했어요');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const lastSyncDisplay = lastKakaoSyncTimestamp
+    ? lastKakaoSyncTimestamp.replace('T', ' ').slice(0, 16)
+    : '없음';
+
+  return (
+    <View style={[ksS.card, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+      <LinearGradient
+        colors={['rgba(217,70,239,0.07)', 'rgba(124,58,237,0.04)']}
+        style={StyleSheet.absoluteFill}
+      />
+
+      <View style={ksS.header}>
+        <LinearGradient
+          colors={['#7C3AED', '#D946EF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={ksS.iconBadge}
+        >
+          <Text style={ksS.iconBadgeText}>💬</Text>
+        </LinearGradient>
+        <View style={{ flex: 1 }}>
+          <Text style={[ksS.title, { color: t.text }]}>추억 데이터 동기화</Text>
+          <Text style={[ksS.sub, { color: t.textSecondary }]}>카카오톡 대화 파일로 감동 순간 학습</Text>
+        </View>
+        <View style={[ksS.countBadge, { backgroundColor: 'rgba(217,70,239,0.14)', borderColor: 'rgba(217,70,239,0.35)' }]}>
+          <Text style={ksS.countText}>{memorySentences.length}개</Text>
+        </View>
+      </View>
+
+      <View style={[ksS.infoRow, { borderColor: t.cardBorder }]}>
+        <Text style={[ksS.infoLabel, { color: t.textMuted }]}>마지막 동기화</Text>
+        <Text style={[ksS.infoValue, { color: t.textSecondary }]}>{lastSyncDisplay}</Text>
+      </View>
+
+      {lastResult && (
+        <View style={ksS.resultBanner}>
+          <Text style={ksS.resultText}>{lastResult}</Text>
+        </View>
+      )}
+
+      <Pressable
+        onPress={handleSyncPress}
+        disabled={isSyncing}
+        style={({ pressed }) => [ksS.syncBtn, (pressed || isSyncing) && { opacity: 0.65 }]}
+      >
+        <LinearGradient
+          colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={ksS.syncBtnInner}
+        >
+          {isSyncing ? (
+            <Animated.View style={[{ flexDirection: 'row', alignItems: 'center', gap: 8 }, syncStyle]}>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={ksS.syncBtnText}>카카오톡 대화 분석 중...</Text>
+            </Animated.View>
+          ) : (
+            <Text style={ksS.syncBtnText}>📂 카카오톡 파일 업로드</Text>
+          )}
+        </LinearGradient>
+      </Pressable>
+
+      <Text style={[ksS.hint, { color: t.textMuted }]}>
+        카카오톡 → 채팅방 → 더보기 → 대화 내보내기 (.txt)
+      </Text>
+    </View>
+  );
+}
+
+const ksS = StyleSheet.create({
+  card: {
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    gap: Spacing.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...Shadows.card,
+  },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  iconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBadgeText: { fontSize: 18 },
+  title: { fontSize: FontSize.base, fontWeight: FontWeight.bold },
+  sub: { fontSize: FontSize.xs, marginTop: 2 },
+  countBadge: {
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+  },
+  countText: { color: '#D946EF', fontSize: FontSize.xs, fontWeight: FontWeight.bold },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  infoLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
+  infoValue: { fontSize: FontSize.xs },
+  resultBanner: {
+    backgroundColor: 'rgba(74,222,128,0.1)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.3)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  resultText: { color: '#4ADE80', fontSize: FontSize.sm, fontWeight: FontWeight.medium },
+  syncBtn: { borderRadius: Radius.xl, overflow: 'hidden' },
+  syncBtnInner: { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
+  syncBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
+  hint: {
+    fontSize: 11,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+});
+
 // ─── Settings Footer ──────────────────────────────────────────────────────────
 
 function SettingsFooter({ t }: { t: ThemeTokens }) {
@@ -2247,6 +2455,11 @@ export default function SettingsScreen() {
         <View style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>데이터 주권</Text>
           <MemoryEraser t={t} />
+        </View>
+
+        <View style={styles.sectionBlock}>
+          <Text style={[styles.sectionTitle, { color: t.textMuted }]}>추억 동기화</Text>
+          <KakaoSyncSection t={t} />
         </View>
 
         <View style={styles.sectionBlock}>

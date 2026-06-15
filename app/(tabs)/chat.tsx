@@ -15,6 +15,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import Animated, {
   FadeIn,
   FadeInRight,
@@ -32,6 +34,7 @@ import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { maskPII, useAppContext } from '../../src/context/AppContext';
+import { runKakaoSyncPipeline } from '../../src/services/kakaoUploadService';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
 import { requestSelfAiLlmResponse, requestToneRegeneration, type ChatHistoryItem } from '../../src/services/selfAiService';
 import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
@@ -934,9 +937,11 @@ interface AttachmentBarHandlers {
   onPickVideo: () => void;
   onShareLocation: () => void;
   onOpenGiftCatalog: () => void;
+  onKakaoLearn: () => void;
+  isKakaoLearning: boolean;
 }
 
-function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCatalog }: AttachmentBarHandlers) {
+function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCatalog, onKakaoLearn, isKakaoLearning }: AttachmentBarHandlers) {
   return (
     <View style={styles.attachBar}>
       <Pressable style={styles.attachBtn} onPress={onPickImage}>
@@ -954,6 +959,16 @@ function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCa
       <Pressable style={styles.attachBtn} onPress={onOpenGiftCatalog}>
         <Text style={styles.attachBtnIcon}>🎁</Text>
         <Text style={styles.attachBtnLabel}>선물</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.attachBtn, isKakaoLearning && { opacity: 0.5 }]}
+        onPress={onKakaoLearn}
+        disabled={isKakaoLearning}
+      >
+        <Text style={styles.attachBtnIcon}>{isKakaoLearning ? '⏳' : '💬'}</Text>
+        <Text style={[styles.attachBtnLabel, { color: '#D946EF', fontWeight: '700' as const }]}>
+          {isKakaoLearning ? '분석중...' : '카카오톡 학습'}
+        </Text>
       </Pressable>
     </View>
   );
@@ -1427,6 +1442,9 @@ function ChatRoomView({
     myProfile, trainingResult,
     subscriptionStatus,
     coupleId,
+    addMemorySentences,
+    lastKakaoSyncTimestamp,
+    setLastKakaoSyncTimestamp,
   } = useAppContext();
 
   // Step #40: derive deep inference flag from subscription plan
@@ -1467,6 +1485,7 @@ function ChatRoomView({
   const [correctionCount, setCorrectionCount] = useState(0);
   const [nudgeTriggered, setNudgeTriggered] = useState(false);
   const [showAttachBar, setShowAttachBar] = useState(false);
+  const [isKakaoLearning, setIsKakaoLearning] = useState(false);
   // Step #17 new state
   const [uploadProgressMap, setUploadProgressMap] = useState<Map<string, number>>(new Map());
   const [giftSheetVisible, setGiftSheetVisible] = useState(false);
@@ -1639,6 +1658,64 @@ function ChatRoomView({
       giftPrice: gift.price,
     });
   }, [addMessage]);
+
+  // ── 카카오톡 대화 학습 (Step #50) ─────────────────────────────────────────────
+  const handleKakaoLearn = useCallback(async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+      let content: string;
+
+      setIsKakaoLearning(true);
+      setShowAttachBar(false);
+
+      if (Platform.OS === 'web') {
+        const res = await fetch(asset.uri);
+        content = await res.text();
+      } else {
+        content = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      }
+
+      if (!content || content.trim().length === 0) {
+        Alert.alert('파일 오류', '비어 있는 파일이에요. 카카오톡 .txt 파일을 선택해주세요.');
+        setIsKakaoLearning(false);
+        return;
+      }
+
+      const { newRecords, newLastTs, deltaCount } = await runKakaoSyncPipeline(
+        content,
+        lastKakaoSyncTimestamp,
+      );
+
+      if (newLastTs) setLastKakaoSyncTimestamp(newLastTs);
+
+      if (newRecords.length > 0) {
+        addMemorySentences(newRecords);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          '카카오톡 학습 완료 💬',
+          `신규 대화 ${deltaCount}건 중 ${newRecords.length}개의 감동 순간을 DNA 나선에 새겼어요! 🧬`,
+          [{ text: '확인', style: 'default' }],
+        );
+      } else if (deltaCount === 0) {
+        Alert.alert('이미 최신이에요 ✅', '이전에 업로드한 이후 새로운 대화 내역이 없어요.', [{ text: '확인' }]);
+      } else {
+        Alert.alert('감동 순간 없음', '신규 대화에서 특별한 순간을 찾지 못했어요. 더 많은 대화를 담아보세요!', [{ text: '확인' }]);
+      }
+    } catch {
+      Alert.alert('오류', '파일을 분석하는 중 문제가 발생했어요. 다시 시도해주세요.');
+    } finally {
+      setIsKakaoLearning(false);
+    }
+  }, [addMemorySentences, lastKakaoSyncTimestamp, setLastKakaoSyncTimestamp]);
 
   // Handle deadlock nudge arriving in AI room
   useEffect(() => {
@@ -1957,6 +2034,8 @@ function ChatRoomView({
           onPickVideo={handlePickVideo}
           onShareLocation={handleShareLocation}
           onOpenGiftCatalog={() => setGiftSheetVisible(true)}
+          onKakaoLearn={handleKakaoLearn}
+          isKakaoLearning={isKakaoLearning}
         />
       )}
 
@@ -2060,9 +2139,73 @@ function ChatRoomView({
 
       {/* [Step #21] Tone Regeneration Loading Overlay — rendered last to sit above all siblings */}
       {isToneRegenerating && <ToneRegenerationLoadingOverlay />}
+
+      {/* [Step #50] KakaoTalk Learning Overlay */}
+      {isKakaoLearning && (
+        <Modal visible transparent animationType="fade" statusBarTranslucent>
+          <View style={kakaoLearnS.overlay}>
+            <View style={kakaoLearnS.card}>
+              <LinearGradient
+                colors={['rgba(217,70,239,0.15)', 'rgba(124,58,237,0.1)']}
+                style={StyleSheet.absoluteFill}
+              />
+              <Text style={kakaoLearnS.emoji}>💬</Text>
+              <Text style={kakaoLearnS.title}>카카오톡 대화 분석 중...</Text>
+              <Text style={kakaoLearnS.sub}>AI가 감동적인 순간을 선별하고 있어요 🧬</Text>
+              <View style={kakaoLearnS.dotRow}>
+                {[0, 1, 2].map((i) => (
+                  <View key={i} style={[kakaoLearnS.dot, { opacity: 0.4 + i * 0.3 }]} />
+                ))}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
+
+const kakaoLearnS = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  card: {
+    width: '100%',
+    backgroundColor: 'rgba(18,6,38,0.97)',
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(217,70,239,0.45)',
+    padding: 28,
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  emoji: { fontSize: 40 },
+  title: {
+    color: '#F1F5F9',
+    fontSize: 17,
+    fontWeight: '700' as const,
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
+  sub: {
+    color: '#94A3B8',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  dotRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D946EF' },
+});
 
 // ─── Gradient Glow Avatar (partner row) ──────────────────────────────────────
 

@@ -1,3 +1,29 @@
+// ─── Brand Identity Tokens (docs/Darkmode_color.PNG) ─────────────────────────
+// Primary   #F48FB1 — 활성화 버튼, 탭 하이라이트, 활성 마커 핀
+// Secondary #CE93D8 — 아카이브 핀, 클러스터 뭉치 배경, 서브 배지
+// Tertiary  #1A1A2E — 앱 전역 배경, 바텀 시트 베이스
+// Neutral   #807477 — 비활성 트랙, 플레이스홀더, 경계선
+
+export const BrandTokens = {
+  PRIMARY:   '#F48FB1',
+  SECONDARY: '#CE93D8',
+  TERTIARY:  '#1A1A2E',
+  NEUTRAL:   '#807477',
+} as const;
+
+// ─── Light Mode Brand Identity Tokens (docs/Lightmode_color.PNG) ──────────────
+// Primary   #70585B — 뮤트 브라운 — 활성 버튼, 탭 하이라이트, 활성 마커 핀
+// Secondary #725477 — 딥 퍼플    — 아카이브 핀, 클러스터 배경색
+// Tertiary  #5355AA — 소프트 실버 블루 — 전역 배경/컨테이너 베이스, 지도 콜아웃
+// Neutral   #7B7676 — 웜 그레이  — 플레이스홀더, 비활성 트랙, 가이드선
+
+export const LightBrandTokens = {
+  PRIMARY:   '#70585B',
+  SECONDARY: '#725477',
+  TERTIARY:  '#5355AA',
+  NEUTRAL:   '#7B7676',
+} as const;
+
 // ─── Brand Color Palette ────────────────────────────────────────────────────
 
 export const Colors = {
@@ -93,43 +119,43 @@ export interface ThemeTokens {
 }
 
 export const LIGHT_THEME: ThemeTokens = {
-  bg: '#FFF5F7',
+  bg: '#F9F6F7',                             // warm white — neutral base
   card: '#FFFFFF',
-  cardBorder: 'rgba(180,140,160,0.18)',
+  cardBorder: 'rgba(112,88,91,0.14)',        // LightBrandTokens.PRIMARY tint
   text: '#1E293B',
-  textSecondary: '#475569',
-  textMuted: '#94A3B8',
-  divider: '#F1E8EC',
-  inputBg: '#F5EEF2',
-  chipBg: 'rgba(255,183,206,0.22)',
-  chipBorder: 'rgba(200,150,180,0.45)',
-  avatarInner: '#FFF0F4',
+  textSecondary: '#4A3D40',                  // darkened PRIMARY
+  textMuted: '#7B7676',                      // LightBrandTokens.NEUTRAL
+  divider: '#EDE8EA',
+  inputBg: '#F4F0F1',
+  chipBg: 'rgba(112,88,91,0.10)',            // PRIMARY tint
+  chipBorder: 'rgba(114,84,119,0.38)',       // SECONDARY tint
+  avatarInner: '#FFF5F7',
   bubbleAI: '#FFFFFF',
   bubbleAIText: '#1E293B',
-  headerBg: '#FFF5F7',
-  segmentTrack: '#F5EEF2',
+  headerBg: '#F9F6F7',
+  segmentTrack: '#EDE8EA',
   isLight: true,
-  gradientColors: ['#FFB7CE', '#E1BEE7', '#B39DDB'],
+  gradientColors: ['#70585B', '#725477', '#5355AA'],  // PRIMARY → SECONDARY → TERTIARY
 };
 
 export const DARK_THEME: ThemeTokens = {
-  bg: '#0A0D1A',
+  bg: '#1A1A2E',           // BrandTokens.TERTIARY
   card: '#1E293B',
   cardBorder: 'rgba(255,255,255,0.06)',
   text: '#F1F5F9',
   textSecondary: '#94A3B8',
-  textMuted: '#64748B',
+  textMuted: '#807477',    // BrandTokens.NEUTRAL
   divider: '#1E293B',
   inputBg: '#1E293B',
-  chipBg: 'rgba(124,58,237,0.12)',
-  chipBorder: 'rgba(124,58,237,0.32)',
+  chipBg: 'rgba(206,147,216,0.12)',   // BrandTokens.SECONDARY tint
+  chipBorder: 'rgba(206,147,216,0.32)',
   avatarInner: '#1E293B',
   bubbleAI: '#1E293B',
   bubbleAIText: '#F1F5F9',
-  headerBg: '#0A0D1A',
+  headerBg: '#1A1A2E',     // BrandTokens.TERTIARY
   segmentTrack: '#1E293B',
   isLight: false,
-  gradientColors: ['#7C3AED', '#D946EF', '#FF6B8B'],
+  gradientColors: ['#F48FB1', '#CE93D8', '#7C3AED'],  // PRIMARY → SECONDARY → violet
 };
 
 export type ThemeMode = 'light' | 'dark';

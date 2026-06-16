@@ -34,6 +34,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import AccuracyBanner from '../../src/components/home/AccuracyBanner';
 import AICoachingCard from '../../src/components/home/AICoachingCard';
+import AIMemoryRingSection from '../../src/components/home/AIMemoryRingSection';
 import MemoryRingSection from '../../src/components/home/MemoryRingSection';
 import MetricsGrid from '../../src/components/home/MetricsGrid';
 import MoodTemperatureSection from '../../src/components/home/MoodTemperatureSection';
@@ -350,10 +351,13 @@ export default function HomeScreen() {
         {/* ── DNA 일치율 서클 카드 (FUN-HOM-003) ── */}
         <DNAScoreCard />
 
-        {/* ── 2순위: 추억 링 섹션 ── */}
+        {/* ── FUN-HOM-004: AI 비전 추억 링 ── */}
         <View ref={refMemoryRing} collapsable={false}>
-          <MemoryRingSection t={t} />
+          <AIMemoryRingSection t={t} />
         </View>
+
+        {/* ── 2순위: 데이트 코스 추억 아카이브 링 ── */}
+        <MemoryRingSection t={t} />
 
         {/* ── 3순위: 오늘의 분위기 & 우리 관계의 온도 ── */}
         <View ref={refMoodTemp} collapsable={false}>

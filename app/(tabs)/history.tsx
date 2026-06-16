@@ -33,14 +33,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import HistoryKakaoMapView from '../../src/components/history/KakaoMapView';
-import DateMapPlanner, { LayerFilterChips } from '../../src/components/history/DateMapPlanner';
+import DateMapPlanner from '../../src/components/history/DateMapPlanner';
 import { KakaoPlace, searchPlacesByKeyword } from '../../src/services/kakaoService';
 import { calculateNextCourseCandidates, CandidatePlace } from '../../src/utils/courseRecommendation';
 // BudgetRange used via inline object — no explicit import needed
 import { requestMuseCourse } from '../../src/services/aiMuseService';
 import { fetchCurrentWeather } from '../../src/services/weatherService';
 import type { WeatherData } from '../../src/services/weatherService';
-import { DateCourse, RecommendedPlace, useAppContext } from '../../src/context/AppContext';
+import { DateCourse, MapLayer, RecommendedPlace, useAppContext } from '../../src/context/AppContext';
 import { HistoryProvider, useHistoryContext } from '../../src/context/HistoryContext';
 import { usePhotoMetadata } from '../../src/hooks/usePhotoMetadata';
 import { useMemoryWall, MemoryNode } from '../../src/hooks/useMemoryWall';
@@ -2322,25 +2322,563 @@ const locPermS = StyleSheet.create({
   btnTxt: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
 
+// ─── LayerControlPanel ────────────────────────────────────────────────────────
+// Hamburger-triggered bottom sheet. Shows HISTORY (auto monthly), PLAN (custom),
+// and SECRET (local-only) layer types with full CRUD and visibility toggles.
+
+function LayerControlPanel({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const {
+    dateCourses,
+    planLayers,
+    layerVisibility,
+    secretCourses,
+    addPlanLayer,
+    removePlanLayer,
+    renamePlanLayer,
+    movePlanLayerUp,
+    movePlanLayerDown,
+    toggleLayerVisible,
+  } = useAppContext();
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameText, setRenameText]   = useState('');
+  const [newName, setNewName]         = useState('');
+  const [showNewInput, setShowNewInput] = useState(false);
+
+  const slideY = useSharedValue(SH);
+
+  useEffect(() => {
+    slideY.value = visible
+      ? withSpring(0, { damping: 22, stiffness: 180 })
+      : withTiming(SH, { duration: 280 });
+  }, [visible]);
+
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: slideY.value }],
+  }));
+
+  // Compute HISTORY layer groups from courses that have no explicit layerId
+  const historyGroups = useMemo(() => {
+    const grouped: Record<string, DateCourse[]> = {};
+    dateCourses.forEach((c) => {
+      if (!c.layerId) {
+        const month = c.date.length >= 7 ? c.date.substring(0, 7) : 'unknown';
+        if (!grouped[month]) grouped[month] = [];
+        grouped[month].push(c);
+      }
+    });
+    return Object.entries(grouped).sort(([a], [b]) => b.localeCompare(a));
+  }, [dateCourses]);
+
+  const fmtMonth = (yyyyMM: string) => {
+    const parts = yyyyMM.split('-');
+    if (parts.length < 2) return yyyyMM;
+    return `${parseInt(parts[0], 10) % 100}년 ${parseInt(parts[1], 10)}월`;
+  };
+
+  const handleAddLayer = () => {
+    const name = newName.trim() || `새 계획 ${planLayers.length + 1}`;
+    addPlanLayer(name);
+    setNewName('');
+    setShowNewInput(false);
+  };
+
+  const handleRenameConfirm = (id: string) => {
+    if (renameText.trim()) renamePlanLayer(id, renameText.trim());
+    setRenamingId(null);
+    setRenameText('');
+  };
+
+  const sortedPlanLayers = useMemo(
+    () => [...planLayers].sort((a, b) => a.order - b.order),
+    [planLayers],
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={lcpS.backdrop} onPress={onClose} />
+
+      <Animated.View style={[lcpS.sheet, panelStyle]}>
+        <LinearGradient
+          colors={['rgba(12,16,30,0.99)', 'rgba(10,13,26,1)']}
+          style={lcpS.inner}
+        >
+          <View style={lcpS.handle} />
+
+          {/* Header */}
+          <View style={lcpS.headerRow}>
+            <View style={lcpS.headerLeft}>
+              <Text style={lcpS.headerHamburger}>≡</Text>
+              <Text style={lcpS.headerTitle}>레이어 관리</Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={12} style={lcpS.closeBtn}>
+              <Text style={lcpS.closeTxt}>✕</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+
+            {/* ══ HISTORY LAYERS ══════════════════════════════════════════════ */}
+            <View style={lcpS.sectionHeader}>
+              <Text style={lcpS.sectionIcon}>🕐</Text>
+              <Text style={lcpS.sectionTitle}>히스토리 레이어</Text>
+              <View style={lcpS.autoBadge}>
+                <Text style={lcpS.autoBadgeTxt}>자동 생성</Text>
+              </View>
+            </View>
+
+            {historyGroups.length === 0 ? (
+              <View style={lcpS.emptyBox}>
+                <Text style={lcpS.emptyTxt}>
+                  방문 코스를 추가하면 월별로 자동 생성돼요 📍
+                </Text>
+              </View>
+            ) : (
+              historyGroups.map(([month, courses]) => {
+                const key = `history-${month}`;
+                const isVisible = layerVisibility[key] !== false;
+                return (
+                  <View key={key} style={lcpS.layerRow}>
+                    <Text style={lcpS.lockEmoji}>🔒</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={lcpS.layerName}>{fmtMonth(month)}</Text>
+                      <Text style={lcpS.layerMeta}>{courses.length}개 코스</Text>
+                    </View>
+                    <Pressable onPress={() => toggleLayerVisible(key)} style={lcpS.eyeBtn} hitSlop={8}>
+                      <Text style={[lcpS.eyeEmoji, !isVisible && lcpS.eyeOff]}>
+                        {isVisible ? '👁️' : '👁️‍🗨️'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+
+            <View style={lcpS.divider} />
+
+            {/* ══ PLAN LAYERS ═════════════════════════════════════════════════ */}
+            <View style={lcpS.sectionHeader}>
+              <Text style={lcpS.sectionIcon}>📋</Text>
+              <Text style={lcpS.sectionTitle}>계획 레이어</Text>
+              <Pressable
+                style={lcpS.addLayerBtn}
+                onPress={() => setShowNewInput(true)}
+              >
+                <LinearGradient
+                  colors={['#7C3AED', '#D946EF']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={lcpS.addLayerGrad}
+                >
+                  <Text style={lcpS.addLayerTxt}>+ 새 계획 레이어</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+
+            {showNewInput && (
+              <View style={lcpS.newLayerRow}>
+                <TextInput
+                  style={lcpS.newLayerInput}
+                  placeholder="레이어 이름 입력..."
+                  placeholderTextColor="#475569"
+                  value={newName}
+                  onChangeText={setNewName}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={handleAddLayer}
+                />
+                <Pressable onPress={handleAddLayer} style={lcpS.confirmBtn}>
+                  <Text style={lcpS.confirmTxt}>✓</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setShowNewInput(false); setNewName(''); }}
+                  style={lcpS.cancelBtn}
+                >
+                  <Text style={lcpS.cancelTxt}>✕</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {sortedPlanLayers.length === 0 && !showNewInput && (
+              <View style={lcpS.emptyBox}>
+                <Text style={lcpS.emptyTxt}>
+                  + 버튼으로 나만의 데이트 계획 레이어를 만들어보세요 🗺️
+                </Text>
+              </View>
+            )}
+
+            {sortedPlanLayers.map((layer, idx) => {
+              const isVisible = layerVisibility[layer.id] !== false;
+              const isRenaming = renamingId === layer.id;
+              const count = dateCourses.filter((c) => c.layerId === layer.id).length;
+              return (
+                <View key={layer.id} style={{ marginBottom: 8 }}>
+                  <View style={lcpS.planRow}>
+                    {isRenaming ? (
+                      <TextInput
+                        style={lcpS.renameInput}
+                        value={renameText}
+                        onChangeText={setRenameText}
+                        autoFocus
+                        returnKeyType="done"
+                        onSubmitEditing={() => handleRenameConfirm(layer.id)}
+                      />
+                    ) : (
+                      <View style={{ flex: 1 }}>
+                        <Text style={lcpS.layerName}>{layer.name}</Text>
+                        <Text style={lcpS.layerMeta}>{count}개 코스</Text>
+                      </View>
+                    )}
+
+                    <Pressable onPress={() => toggleLayerVisible(layer.id)} style={lcpS.eyeBtn} hitSlop={8}>
+                      <Text style={[lcpS.eyeEmoji, !isVisible && lcpS.eyeOff]}>
+                        {isVisible ? '👁️' : '👁️‍🗨️'}
+                      </Text>
+                    </Pressable>
+
+                    {isRenaming ? (
+                      <Pressable onPress={() => handleRenameConfirm(layer.id)} style={lcpS.iconBtn}>
+                        <Text style={lcpS.iconBtnTxt}>✓</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        onPress={() => { setRenamingId(layer.id); setRenameText(layer.name); }}
+                        style={lcpS.iconBtn}
+                      >
+                        <Text style={lcpS.iconBtnTxt}>✎</Text>
+                      </Pressable>
+                    )}
+
+                    <Pressable onPress={() => removePlanLayer(layer.id)} style={lcpS.iconBtn}>
+                      <Text style={[lcpS.iconBtnTxt, { color: '#EF4444' }]}>🗑</Text>
+                    </Pressable>
+                  </View>
+
+                  {/* Up / Down reorder arrows */}
+                  <View style={lcpS.orderRow}>
+                    <Pressable
+                      onPress={() => movePlanLayerUp(layer.id)}
+                      disabled={idx === 0}
+                      style={[lcpS.orderBtn, idx === 0 && lcpS.orderBtnOff]}
+                    >
+                      <Text style={lcpS.orderBtnTxt}>▲ 위로</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => movePlanLayerDown(layer.id)}
+                      disabled={idx === sortedPlanLayers.length - 1}
+                      style={[lcpS.orderBtn, idx === sortedPlanLayers.length - 1 && lcpS.orderBtnOff]}
+                    >
+                      <Text style={lcpS.orderBtnTxt}>▼ 아래로</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+
+            <View style={lcpS.divider} />
+
+            {/* ══ SECRET LAYER ════════════════════════════════════════════════ */}
+            <View style={lcpS.sectionHeader}>
+              <Text style={lcpS.sectionIcon}>🤫</Text>
+              <Text style={lcpS.sectionTitle}>나만 보기 레이어</Text>
+              <View style={lcpS.localBadge}>
+                <Text style={lcpS.localBadgeTxt}>로컬 전용</Text>
+              </View>
+            </View>
+
+            {/* Secret card — midnight purple border */}
+            <View style={lcpS.secretCard}>
+              <LinearGradient
+                colors={['rgba(60,4,72,0.28)', 'rgba(76,29,149,0.22)']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={lcpS.secretGrad}
+              >
+                <Text style={lcpS.secretEmoji}>🤫</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={lcpS.layerName}>시크릿 플래너</Text>
+                  <Text style={lcpS.layerMeta}>
+                    {secretCourses.length}개 코스 · 연인에게 비공개
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => toggleLayerVisible('secret')}
+                  style={lcpS.eyeBtn}
+                  hitSlop={8}
+                >
+                  <Text style={[
+                    lcpS.eyeEmoji,
+                    layerVisibility['secret'] === false && lcpS.eyeOff,
+                  ]}>
+                    {layerVisibility['secret'] !== false ? '👁️' : '👁️‍🗨️'}
+                  </Text>
+                </Pressable>
+              </LinearGradient>
+            </View>
+
+            <View style={lcpS.secretNote}>
+              <Text style={lcpS.secretNoteTxt}>
+                🔐 이 레이어의 데이터는 기기 로컬에만 저장되며 서버 동기화가 차단됩니다
+              </Text>
+            </View>
+
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </LinearGradient>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+const lcpS = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+  },
+  sheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: SH * 0.82,
+    borderTopLeftRadius: Radius['2xl'],
+    borderTopRightRadius: Radius['2xl'],
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(124,58,237,0.42)',
+  },
+  inner: {
+    flex: 1,
+    paddingHorizontal: Spacing.base,
+    paddingTop: Spacing.sm,
+    paddingBottom: 8,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(148,163,184,0.28)',
+    alignSelf: 'center',
+    marginBottom: Spacing.lg,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.lg,
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerHamburger: {
+    color: '#C084FC',
+    fontSize: 24,
+    fontWeight: '800' as const,
+    lineHeight: 26,
+  },
+  headerTitle: { color: '#F1F5F9', fontSize: FontSize.xl, fontWeight: FontWeight.bold },
+  closeBtn: { padding: 6 },
+  closeTxt: { color: '#64748B', fontSize: 18 },
+  // Section headers
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  sectionIcon: { fontSize: 16 },
+  sectionTitle: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.bold, flex: 1 },
+  autoBadge: {
+    backgroundColor: 'rgba(124,58,237,0.18)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+  },
+  autoBadgeTxt: { color: '#C084FC', fontSize: 10, fontWeight: FontWeight.bold },
+  localBadge: {
+    backgroundColor: 'rgba(74,4,78,0.28)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.55)',
+  },
+  localBadgeTxt: { color: '#A78BFA', fontSize: 10, fontWeight: FontWeight.bold },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(124,58,237,0.2)',
+    marginVertical: Spacing.lg,
+  },
+  // Common layer row
+  layerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(30,41,59,0.55)',
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(100,116,139,0.18)',
+  },
+  lockEmoji: { fontSize: 14 },
+  layerName: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  layerMeta: { color: '#64748B', fontSize: 11, marginTop: 2 },
+  eyeBtn: { padding: 4 },
+  eyeEmoji: { fontSize: 20 },
+  eyeOff: { opacity: 0.28 },
+  emptyBox: { alignItems: 'center', paddingVertical: Spacing.lg },
+  emptyTxt: { color: '#475569', fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18 },
+  // Plan layer add
+  addLayerBtn: { borderRadius: Radius.pill, overflow: 'hidden' },
+  addLayerGrad: { paddingHorizontal: 12, paddingVertical: 5 },
+  addLayerTxt: { color: '#fff', fontSize: 11, fontWeight: FontWeight.bold },
+  newLayerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: Spacing.sm,
+  },
+  newLayerInput: {
+    flex: 1,
+    backgroundColor: 'rgba(30,41,59,0.85)',
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
+    color: '#F1F5F9',
+    fontSize: FontSize.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.45)',
+  },
+  confirmBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(74,222,128,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.5)',
+  },
+  confirmTxt: { color: '#4ADE80', fontSize: 18, fontWeight: FontWeight.bold },
+  cancelBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(100,116,139,0.12)',
+  },
+  cancelTxt: { color: '#64748B', fontSize: 16 },
+  // Plan layer row
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(30,41,59,0.55)',
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.18)',
+  },
+  renameInput: {
+    flex: 1,
+    backgroundColor: 'rgba(30,41,59,0.85)',
+    borderRadius: Radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    color: '#F1F5F9',
+    fontSize: FontSize.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.5)',
+  },
+  iconBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  iconBtnTxt: { color: '#94A3B8', fontSize: 15 },
+  // Order buttons
+  orderRow: { flexDirection: 'row', gap: 6, paddingLeft: Spacing.md, marginTop: 5 },
+  orderBtn: {
+    backgroundColor: 'rgba(30,41,59,0.5)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(100,116,139,0.2)',
+  },
+  orderBtnOff: { opacity: 0.22 },
+  orderBtnTxt: { color: '#94A3B8', fontSize: 10, fontWeight: FontWeight.bold },
+  // Secret layer card
+  secretCard: {
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.6)',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  secretGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: Spacing.md,
+  },
+  secretEmoji: { fontSize: 22 },
+  secretNote: {
+    marginTop: 10,
+    backgroundColor: 'rgba(124,58,237,0.1)',
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.25)',
+  },
+  secretNoteTxt: { color: '#8B7CB3', fontSize: 11, lineHeight: 16 },
+});
+
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
-  const { dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse, setCurrentOOTD, setCurrentMood } = useAppContext();
+  const {
+    dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel,
+    triggerAddCourse, setTriggerAddCourse, setCurrentOOTD, setCurrentMood,
+    layerVisibility, secretCourses, toggleLayerVisible,
+  } = useAppContext();
   const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
   const { pickPhoto } = usePhotoMetadata();
 
-  // ── Layer filter state ─────────────────────────────────────────────────────
-  // Layer 1 (pending): upcoming courses with no rating yet → neon pink pins
-  // Layer 2 (archive): visited courses with at least one rating  → purple pins
-  const [layerPending, setLayerPending] = useState(true);
-  const [layerArchive, setLayerArchive] = useState(false);
+  // ── Layer control panel ────────────────────────────────────────────────────
+  const [layerPanelVisible, setLayerPanelVisible] = useState(false);
 
+  // ── FUN-HIS-006: layer-aware filtering ────────────────────────────────────
+  // Courses with no layerId → HISTORY (grouped by month, visibility by key history-YYYY-MM)
+  // Courses with layerId    → PLAN   (visibility by key = layerId)
   const filteredCourses = useMemo(() => {
     return dateCourses.filter((c) => {
-      const isPending = c.myRating === 0 && c.partnerRating === 0;
-      return isPending ? layerPending : layerArchive;
+      if (c.layerId) {
+        return layerVisibility[c.layerId] !== false;
+      }
+      const month = c.date.length >= 7 ? c.date.substring(0, 7) : 'unknown';
+      return layerVisibility[`history-${month}`] !== false;
     });
-  }, [dateCourses, layerPending, layerArchive]);
+  }, [dateCourses, layerVisibility]);
+
+  // Secret courses — shown only when secret layer is not explicitly hidden
+  const visibleSecretCourses = useMemo(
+    () => (layerVisibility['secret'] !== false ? secretCourses : []),
+    [secretCourses, layerVisibility],
+  );
+
+  // Combined for KakaoMapView (regular + secret)
+  const allMapCourses = useMemo(
+    () => [...filteredCourses, ...visibleSecretCourses],
+    [filteredCourses, visibleSecretCourses],
+  );
 
   // ── Planner state ──────────────────────────────────────────────────────────
   const [plannerVisible, setPlannerVisible] = useState(false);
@@ -2420,11 +2958,10 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     fetchCandidates(newCourse, budgetRange);
   };
 
-  // Reactive coordinate chain — recomputed whenever courses are added/removed/reordered.
-  // Sorted by date ASC so the Polyline traces the chronological date journey.
+  // Reactive coordinate chain — only visible (non-secret) courses form the polyline.
   const courseRoute = useMemo(
-    () => generateRoutePolylineSegments(dateCourses),
-    [dateCourses],
+    () => generateRoutePolylineSegments(filteredCourses),
+    [filteredCourses],
   );
 
   // ── GPS real-time location engine (Step #32) ──────────────────────────────
@@ -2562,7 +3099,7 @@ function DateMapView({ t }: { t: ThemeTokens }) {
       {/* ── Map canvas ── */}
       <View style={[mapV.mapContainer, { height: MAP_H }]}>
         <HistoryKakaoMapView
-          courses={filteredCourses}
+          courses={allMapCourses}
           photos={historyPlaces}
           onMarkerPress={(c) => { setSelectedCourse(c); setRecommendations(null); }}
           recommendedPlaces={recommendations ?? undefined}
@@ -2571,13 +3108,6 @@ function DateMapView({ t }: { t: ThemeTokens }) {
           courseRoute={courseRoute}
           userLocation={geoLocation.isReal ? geoLocation.coords : undefined}
           onMapLongPress={handleMapLongPress}
-        />
-
-        {/* ── Layer filter chips (top-left inside map canvas) ── */}
-        <LayerFilterChips
-          pending={layerPending}
-          archive={layerArchive}
-          onChange={(p, a) => { setLayerPending(p); setLayerArchive(a); }}
         />
 
         {/* ── GPS 내 위치 버튼 (My Location FAB) — top-right inside map ── */}
@@ -2602,6 +3132,24 @@ function DateMapView({ t }: { t: ThemeTokens }) {
               <View style={mapV.gpsDot} />
             )}
             <Text style={mapV.gpsBtnIcon}>◎</Text>
+          </LinearGradient>
+        </Pressable>
+
+        {/* ── 햄버거 레이어 컨트롤 버튼 — top-right, below GPS ── */}
+        <Pressable
+          onPress={() => setLayerPanelVisible(true)}
+          style={mapV.hamburgerBtn}
+          accessibilityLabel="레이어 관리 패널 열기"
+        >
+          <LinearGradient
+            colors={['rgba(10,13,26,0.92)', 'rgba(30,20,46,0.88)']}
+            style={mapV.hamburgerGrad}
+          >
+            <View style={mapV.hamburgerLines}>
+              <View style={mapV.hamburgerLine} />
+              <View style={mapV.hamburgerLine} />
+              <View style={mapV.hamburgerLine} />
+            </View>
           </LinearGradient>
         </Pressable>
 
@@ -2796,6 +3344,12 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         onDismiss={() => setShowPermModal(false)}
       />
 
+      {/* ── Layer Control Panel (hamburger) ── */}
+      <LayerControlPanel
+        visible={layerPanelVisible}
+        onClose={() => setLayerPanelVisible(false)}
+      />
+
       {/* ── Date Course Planner Bottom Sheet ── */}
       <DateMapPlanner
         visible={plannerVisible}
@@ -2837,6 +3391,36 @@ const mapV = StyleSheet.create({
     shadowRadius: 10,
     elevation: 12,
     zIndex: 30,
+  },
+  // ── Hamburger Layer Control Button (top-right, below GPS) ────────────────────
+  hamburgerBtn: {
+    position: 'absolute',
+    top: 60,   // GPS button: top 12, height 40 → ends at 52; add 8px gap → 60
+    right: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.5)',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    elevation: 12,
+    zIndex: 30,
+  },
+  hamburgerGrad: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hamburgerLines: { gap: 4, alignItems: 'center' },
+  hamburgerLine: {
+    width: 18,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#C084FC',
   },
   gpsBtnGrad: {
     flex: 1,

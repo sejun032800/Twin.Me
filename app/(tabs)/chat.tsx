@@ -1427,6 +1427,66 @@ function MessageBubble({
   );
 }
 
+// ─── Report Arrival Banner (analyst room sticky header) ───────────────────────
+// Pinned above the FlatList in the analyst room — always visible, never scrolls.
+// Spec: "최상단에 고정된 상단 인라인 배너 카드 / 📅 [OO주차] 분석가 트윈이의 주간 연애 리포트가 도착했습니다!"
+
+function ReportArrivalBanner({ weekLabel, onPress }: { weekLabel: string; onPress: () => void }) {
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(withTiming(1, { duration: 1700 }), withTiming(0, { duration: 1700 })),
+      -1, false,
+    );
+  }, [pulse]);
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: 0.42 + pulse.value * 0.38,
+  }));
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.84} style={reportBannerStyles.wrap}>
+      <Animated.View style={[StyleSheet.absoluteFill, reportBannerStyles.glowLayer, glowStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={['rgba(124,58,237,0.26)', 'rgba(217,70,239,0.18)', 'rgba(255,107,139,0.10)']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={{ flex: 1 }}
+        />
+      </Animated.View>
+      <Text style={reportBannerStyles.icon}>📅</Text>
+      <View style={reportBannerStyles.textCol}>
+        <Text style={reportBannerStyles.weekTag}>[{weekLabel}]</Text>
+        <Text style={reportBannerStyles.body} numberOfLines={1}>
+          분석가 트윈이의 주간 연애 리포트가 도착했습니다!
+        </Text>
+      </View>
+      <Text style={reportBannerStyles.chevron}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+const reportBannerStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 2,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.50)',
+    backgroundColor: 'rgba(10,5,28,0.88)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  glowLayer: { borderRadius: 12 },
+  icon: { fontSize: 18 },
+  textCol: { flex: 1 },
+  weekTag: { color: '#A78BFA', fontSize: 10, fontWeight: '700' as const, marginBottom: 1 },
+  body: { color: '#C084FC', fontSize: 12, fontWeight: '600' as const, lineHeight: 16 },
+  chevron: { color: '#7C3AED', fontSize: 20, fontWeight: '300' as const },
+});
+
 // ─── Chat Room View ───────────────────────────────────────────────────────────
 
 const ALPHA = 0.1;
@@ -1444,6 +1504,7 @@ function ChatRoomView({
     myProfile, trainingResult,
     subscriptionStatus,
     coupleId,
+    weeklyReportData,
     addMemorySentences,
     lastKakaoSyncTimestamp,
     setLastKakaoSyncTimestamp,
@@ -2055,6 +2116,14 @@ function ChatRoomView({
       {/* Tone Guide Drop-in popup (AI room) */}
       {currentToneAlert && (
         <ToneGuidePopup alert={currentToneAlert} onDismiss={streamState.dismissToneAlert} />
+      )}
+
+      {/* ── FUN-REP-001: Sticky Report Arrival Banner (analyst room only) ────── */}
+      {roomType === 'analyst' && weeklyReportData && !weeklyReportData.isLoading && (
+        <ReportArrivalBanner
+          weekLabel={weeklyReportData.weekLabel}
+          onPress={onOpenReport}
+        />
       )}
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>

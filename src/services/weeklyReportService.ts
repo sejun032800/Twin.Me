@@ -24,6 +24,30 @@ export interface TopicItem {
   color: string;
 }
 
+// ── FUN-REP-001 premium data types ───────────────────────────────────────────
+
+export interface BestMomentLog {
+  role: 'me' | 'partner';
+  text: string;
+  time: string;
+}
+
+export interface MatchStats {
+  possession: { me: number; partner: number };
+  shotsOnTarget: { me: number; partner: number };
+  fouls: { me: number; partner: number };
+  distanceCovered: { me: number; partner: number };
+}
+
+export interface AuditLogEntry {
+  datetime: string;
+  sender: string;
+  code: string;
+  label: string;
+  delta: string;
+  isPositive: boolean;
+}
+
 export interface WeeklyReportData {
   weekLabel: string;
   generatedAt: number; // unix ms
@@ -36,6 +60,14 @@ export interface WeeklyReportData {
   radarValues: number[]; // 0–1 per axis
   analystComment: string;
   isLoading: boolean;
+  // ── FUN-REP-001: Free tier fields ────────────────────────────────────────
+  topTopics: string[];      // TOP 3 keyword text list shown to free users
+  bestMomentText: string;   // one-line highlight excerpt for free users
+  // ── FUN-REP-001: Premium tier fields ─────────────────────────────────────
+  questQuestion?: string;
+  bestMomentChatLogs?: BestMomentLog[];
+  matchStats?: MatchStats;
+  auditLogs?: AuditLogEntry[];
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -281,6 +313,10 @@ export function computeWeeklyMetrics(
   const radarAxes = ['애정', '안정성', '소통', '갈등조절', '친밀도'];
   const radarValues = computeRadarValues(workingMessages, myName);
 
+  // Free-tier quick fields
+  const topTopics = topics.slice(0, 3).map((t) => t.label);
+  const bestMomentText = workingMessages.find((m) => m.speaker === myName && m.content.length > 10)?.content.slice(0, 40) ?? '이번 주에도 사랑스러운 순간들이 가득했어요 💕';
+
   return {
     weekLabel,
     overallScore,
@@ -290,6 +326,8 @@ export function computeWeeklyMetrics(
     emotionLabels: DAY_LABELS,
     radarAxes,
     radarValues,
+    topTopics,
+    bestMomentText,
   };
 }
 
@@ -473,6 +511,44 @@ async function saveLastGeneratedTimestamp(ts: number): Promise<void> {
 // LAYER 6 — Full pipeline orchestrator
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function buildMockPremiumFields(
+  myName: string,
+  partnerName: string,
+): Pick<WeeklyReportData, 'questQuestion' | 'bestMomentChatLogs' | 'matchStats' | 'auditLogs'> {
+  return {
+    questQuestion: `최근 두 분 사이에 '서운함' 토픽이 평소보다 22.4% 상승했어요. 오늘 밤엔 "${partnerName}아, 요즘 내가 무심코 던진 말 중에 마음에 걸렸던 게 있었어?"라고 먼저 따뜻하게 물어보는 건 어떨까요?`,
+    bestMomentChatLogs: [
+      { role: 'partner', text: '오늘도 진짜 힘들었는데 네가 있어서 버텼어', time: '오후 11:02' },
+      { role: 'me', text: '나도 네가 있어서 얼마나 행복한지 몰라 💕', time: '오후 11:03' },
+      { role: 'partner', text: 'ㅋㅋㅋ 갑자기 왜이래 배꼽 빠지는 줄', time: '오후 11:03' },
+      { role: 'me', text: '사랑하니까 😊', time: '오후 11:04' },
+    ],
+    matchStats: {
+      possession:      { me: 62, partner: 38 },
+      shotsOnTarget:   { me: 8,  partner: 5  },
+      fouls:           { me: 3,  partner: 1  },
+      distanceCovered: { me: 4218, partner: 3891 },
+    },
+    auditLogs: [
+      { datetime: '6월 9일 09:14',  sender: myName,      code: 'G-REG-006', label: '선제적 일상 공유',        delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 9일 21:38',  sender: partnerName, code: 'G-REG-002', label: '칭찬 및 지지 피드백',     delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 10일 14:22', sender: myName,      code: 'L-MIC-002', label: '영혼 없는 단답 리액션',   delta: '-0.1%', isPositive: false },
+      { datetime: '6월 11일 10:55', sender: myName,      code: 'G-REG-005', label: '비대면 텍스트 밀도 케어', delta: '+0.2%', isPositive: true  },
+      { datetime: '6월 11일 22:03', sender: partnerName, code: 'G-REG-004', label: '미래/공동 서사 언급',     delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 12일 13:30', sender: myName,      code: 'L-MIC-004', label: '텍스트 대기 방치(읽씹)',  delta: '-0.1%', isPositive: false },
+      { datetime: '6월 12일 23:17', sender: myName,      code: 'G-CON-001', label: '성찰 후 I-Message 재개', delta: '+0.3%', isPositive: true  },
+      { datetime: '6월 13일 08:48', sender: partnerName, code: 'G-REG-001', label: 'T형 유저 감정 미러링',    delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 13일 20:12', sender: myName,      code: 'L-MIC-006', label: '업무형 텍스트 변환',     delta: '-0.1%', isPositive: false },
+      { datetime: '6월 14일 12:05', sender: myName,      code: 'G-REG-003', label: '이모티콘/문체 동기화',   delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 14일 17:44', sender: partnerName, code: 'L-MIC-001', label: 'F형 서운함 무시',        delta: '-0.2%', isPositive: false },
+      { datetime: '6월 14일 23:29', sender: myName,      code: 'G-CON-002', label: '명시적 사과 및 수용',     delta: '+0.3%', isPositive: true  },
+      { datetime: '6월 15일 09:20', sender: myName,      code: 'G-REG-002', label: '칭찬 및 지지 피드백',    delta: '+0.1%', isPositive: true  },
+      { datetime: '6월 15일 14:32', sender: myName,      code: 'G-CON-001', label: '성찰 후 I-Message 재개', delta: '+0.3%', isPositive: true  },
+      { datetime: '6월 15일 22:11', sender: partnerName, code: 'L-MIC-001', label: 'F형 서운함 공감 실패',    delta: '-0.2%', isPositive: false },
+    ],
+  };
+}
+
 export async function generateFullReport(
   rawKakaoText: string,
   myProfile: UserProfile,
@@ -480,9 +556,11 @@ export async function generateFullReport(
 ): Promise<WeeklyReportData> {
   const metrics = computeWeeklyMetrics(rawKakaoText, myProfile.name);
   const analystComment = await generateAnalystSummary(metrics, myProfile, partnerProfile);
+  const premiumFields = buildMockPremiumFields(myProfile.name, partnerProfile.name);
 
   const report: WeeklyReportData = {
     ...metrics,
+    ...premiumFields,
     generatedAt: Date.now(),
     analystComment,
     isLoading: false,
@@ -523,4 +601,6 @@ export const LOADING_PLACEHOLDER: WeeklyReportData = {
   radarValues: Array(5).fill(0.5),
   analystComment: '채팅 데이터를 분석하고 있어요. 잠시만 기다려주세요... 🔬',
   isLoading: true,
+  topTopics: [],
+  bestMomentText: '',
 };

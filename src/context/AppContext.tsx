@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { DARK_THEME, LIGHT_THEME, ThemeMode, ThemeTokens } from '../styles/theme';
+import type { Photo, MemoryRing } from '../types/gallery';
+import { generateTopMemoryRings } from '../utils/photoAnalyzer';
 import {
   ChatStyleProfile,
   DEFAULT_CHAT_STYLE_PROFILE,
@@ -39,6 +41,17 @@ export type { ChatStyleProfile };
 export type { KakaoSyncRecord };
 export type { HighlightCard };
 export type { MicroEventCode, OverflowStatus };
+export type { Photo, MemoryRing };
+
+// ── Map Layer System (FUN-HIS-006) ────────────────────────────────────────────
+export type LayerType = 'HISTORY' | 'PLAN' | 'SECRET';
+export interface MapLayer {
+  id: string;
+  name: string;
+  type: LayerType;
+  order: number;
+  isVisible: boolean;
+}
 
 // ── Privacy Level ─────────────────────────────────────────────────────────────
 // 3 = 완전복제(Full Clone, default) · 2 = 최적화(Optimized) · 1 = 보호(Protected)
@@ -79,6 +92,8 @@ export interface DateCourse {
   // Kakao place ID — set when the course is created via the Kakao place search.
   // Used by usePartnerPlaceReview to correlate partner reviews with places.
   kakaoPlaceId?: string;
+  // Layer assignment (PLAN layer, FUN-HIS-006). Undefined = auto HISTORY layer.
+  layerId?: string;
   // Memory ring metadata
   imageUrl?: string;
   myOotd?: string;
@@ -229,9 +244,46 @@ interface AppContextValue {
   setCurrentOOTD: (v: string | null) => void;
   currentMood: string | null;
   setCurrentMood: (v: string | null) => void;
+  // Gallery photo archive + AI-curated memory rings (FUN-HOM-004)
+  galleryPhotos: Photo[];
+  memoryRings: MemoryRing[];
+  addGalleryPhotos: (photos: Photo[]) => void;
   // Resets all session state to initial defaults (Step #43 — logout pipeline)
   resetSession: () => void;
+  // ── Map Layer System (FUN-HIS-006) ─────────────────────────────────────────
+  planLayers: MapLayer[];
+  layerVisibility: Record<string, boolean>; // key → false means hidden; undefined/true = visible
+  secretCourses: DateCourse[];             // local-only, never synced to partner device
+  addPlanLayer: (name: string) => void;
+  removePlanLayer: (id: string) => void;
+  renamePlanLayer: (id: string, name: string) => void;
+  movePlanLayerUp: (id: string) => void;
+  movePlanLayerDown: (id: string) => void;
+  toggleLayerVisible: (id: string) => void;
+  addSecretCourse: (course: DateCourse) => void;
+  removeSecretCourse: (id: string) => void;
 }
+
+// ── Gallery seed data: 15 dummy photos for FUN-HOM-004 ───────────────────────
+// Tags are pre-assigned for deterministic ring clustering during development.
+// Replace with analyzeAndCategorizePhoto() results once Vision API is wired.
+const MOCK_GALLERY_PHOTOS: Photo[] = [
+  { id: 'g1',  uri: 'https://picsum.photos/seed/paris1/600/800',   createdAt: new Date('2024-01-15').getTime(), extractedTags: ['#파리여행', '#sns용사진'] },
+  { id: 'g2',  uri: 'https://picsum.photos/seed/paris2/600/800',   createdAt: new Date('2024-01-20').getTime(), extractedTags: ['#파리여행', '#분위기맛집'] },
+  { id: 'g3',  uri: 'https://picsum.photos/seed/cafe1/600/800',    createdAt: new Date('2024-02-10').getTime(), extractedTags: ['#카페투어', '#sns용사진'] },
+  { id: 'g4',  uri: 'https://picsum.photos/seed/couple1/600/800',  createdAt: new Date('2024-02-14').getTime(), extractedTags: ['#카페투어', '#커플엽사'] },
+  { id: 'g5',  uri: 'https://picsum.photos/seed/paris3/600/800',   createdAt: new Date('2024-03-05').getTime(), extractedTags: ['#파리여행', '#전시관'] },
+  { id: 'g6',  uri: 'https://picsum.photos/seed/gallery1/600/800', createdAt: new Date('2024-03-20').getTime(), extractedTags: ['#전시관', '#sns용사진'] },
+  { id: 'g7',  uri: 'https://picsum.photos/seed/romantic/600/800', createdAt: new Date('2024-04-01').getTime(), extractedTags: ['#커플엽사', '#분위기맛집'] },
+  { id: 'g8',  uri: 'https://picsum.photos/seed/hangang1/600/800', createdAt: new Date('2024-05-02').getTime(), extractedTags: ['#한강피크닉', '#sns용사진'] },
+  { id: 'g9',  uri: 'https://picsum.photos/seed/hangang2/600/800', createdAt: new Date('2024-05-03').getTime(), extractedTags: ['#한강피크닉', '#커플엽사'] },
+  { id: 'g10', uri: 'https://picsum.photos/seed/hongdae/600/800',  createdAt: new Date('2024-07-20').getTime(), extractedTags: ['#홍대', '#분위기맛집'] },
+  { id: 'g11', uri: 'https://picsum.photos/seed/seongsu/600/800',  createdAt: new Date('2024-08-05').getTime(), extractedTags: ['#성수동', '#카페투어'] },
+  { id: 'g12', uri: 'https://picsum.photos/seed/cafeduo/600/800',  createdAt: new Date('2024-09-12').getTime(), extractedTags: ['#카페투어', '#커플엽사'] },
+  { id: 'g13', uri: 'https://picsum.photos/seed/paris4/600/800',   createdAt: new Date('2024-10-03').getTime(), extractedTags: ['#파리여행', '#분위기맛집'] },
+  { id: 'g14', uri: 'https://picsum.photos/seed/museum/600/800',   createdAt: new Date('2024-11-07').getTime(), extractedTags: ['#전시관', '#커플엽사'] },
+  { id: 'g15', uri: 'https://picsum.photos/seed/winter/600/800',   createdAt: new Date('2024-12-15').getTime(), extractedTags: ['#커플엽사', '#sns용사진'] },
+];
 
 const defaultMyProfile: UserProfile = { name: '세준', gender: 'M', mbti: 'ENFJ', enneagram: '3' };
 const defaultPartnerProfile: PartnerProfile = { name: '서영', gender: 'F', mbti: 'INTJ' };
@@ -356,6 +408,20 @@ const AppContext = createContext<AppContextValue>({
   currentMood: null,
   setCurrentMood: () => {},
   resetSession: () => {},
+  planLayers: [],
+  layerVisibility: {},
+  secretCourses: [],
+  addPlanLayer: () => {},
+  removePlanLayer: () => {},
+  renamePlanLayer: () => {},
+  movePlanLayerUp: () => {},
+  movePlanLayerDown: () => {},
+  toggleLayerVisible: () => {},
+  addSecretCourse: () => {},
+  removeSecretCourse: () => {},
+  galleryPhotos: [],
+  memoryRings: [],
+  addGalleryPhotos: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -395,9 +461,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // FUN-HIS-005: AI 뮤즈 선택값 — 무드 피드 필터 구독용
   const [currentOOTD, setCurrentOOTD] = useState<string | null>(null);
   const [currentMood, setCurrentMood] = useState<string | null>(null);
+  // FUN-HOM-004: Gallery photos + AI memory rings
+  const [galleryPhotos, setGalleryPhotos] = useState<Photo[]>(MOCK_GALLERY_PHOTOS);
+  const [memoryRings, setMemoryRings] = useState<MemoryRing[]>(() =>
+    generateTopMemoryRings(MOCK_GALLERY_PHOTOS),
+  );
+
+  useEffect(() => {
+    setMemoryRings(generateTopMemoryRings(galleryPhotos));
+  }, [galleryPhotos]);
+
+  const addGalleryPhotos = (photos: Photo[]) =>
+    setGalleryPhotos((prev) => {
+      const existingIds = new Set(prev.map((p) => p.id));
+      const newOnly = photos.filter((p) => !existingIds.has(p.id));
+      return [...prev, ...newOnly];
+    });
+
+  // FUN-HIS-006: 멀티 레이어 시스템
+  const [planLayers, setPlanLayers] = useState<MapLayer[]>([]);
+  const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({});
+  const [secretCourses, setSecretCourses] = useState<DateCourse[]>([
+    {
+      id: 'secret-demo-1',
+      title: '🤫 제주도 서프라이즈 여행 (기밀)',
+      date: '2026-07-14',
+      latitude: 33.4996,
+      longitude: 126.5312,
+      myRating: 0,
+      myReview: '기념일 깜짝 여행 계획 중 🤫',
+      partnerRating: 0,
+      partnerReview: '',
+    },
+  ]);
 
   const setCoupleInfo = (info: Partial<CoupleInfo>) =>
     setCoupleInfoState((prev) => ({ ...prev, ...info }));
+
+  // ── FUN-HIS-006: Map Layer CRUD ──────────────────────────────────────────────
+  const addPlanLayer = (name: string) => {
+    const newLayer: MapLayer = {
+      id: `plan-${Date.now()}`,
+      name,
+      type: 'PLAN',
+      order: planLayers.length,
+      isVisible: true,
+    };
+    setPlanLayers((prev) => [...prev, newLayer]);
+  };
+  const removePlanLayer = (id: string) =>
+    setPlanLayers((prev) => prev.filter((l) => l.id !== id));
+  const renamePlanLayer = (id: string, name: string) =>
+    setPlanLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)));
+  const movePlanLayerUp = (id: string) => {
+    setPlanLayers((prev) => {
+      const sorted = [...prev].sort((a, b) => a.order - b.order);
+      const idx = sorted.findIndex((l) => l.id === id);
+      if (idx <= 0) return prev;
+      return sorted.map((l, i) => {
+        if (i === idx - 1) return { ...l, order: sorted[idx].order };
+        if (i === idx)     return { ...l, order: sorted[idx - 1].order };
+        return l;
+      });
+    });
+  };
+  const movePlanLayerDown = (id: string) => {
+    setPlanLayers((prev) => {
+      const sorted = [...prev].sort((a, b) => a.order - b.order);
+      const idx = sorted.findIndex((l) => l.id === id);
+      if (idx < 0 || idx >= sorted.length - 1) return prev;
+      return sorted.map((l, i) => {
+        if (i === idx)     return { ...l, order: sorted[idx + 1].order };
+        if (i === idx + 1) return { ...l, order: sorted[idx].order };
+        return l;
+      });
+    });
+  };
+  // Toggle: if currently visible (undefined or true) → false; if false → true
+  const toggleLayerVisible = (id: string) =>
+    setLayerVisibility((prev) => ({ ...prev, [id]: prev[id] !== false ? false : true }));
+  const addSecretCourse = (course: DateCourse) =>
+    setSecretCourses((prev) => [{ ...course, id: `secret-${course.id}-${Date.now()}` }, ...prev]);
+  const removeSecretCourse = (id: string) =>
+    setSecretCourses((prev) => prev.filter((c) => c.id !== id));
   const addUploadedMedia = (delta = 1) =>
     setUploadedMediaCount((prev) => prev + delta);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
@@ -470,6 +616,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTriggerMirrorMode(false);
     setCurrentOOTD(null);
     setCurrentMood(null);
+    setPlanLayers([]);
+    setLayerVisibility({});
+    setSecretCourses([]);
+    setGalleryPhotos(MOCK_GALLERY_PHOTOS);
   };
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
@@ -573,6 +723,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentMood,
         setCurrentMood,
         resetSession,
+        planLayers,
+        layerVisibility,
+        secretCourses,
+        addPlanLayer,
+        removePlanLayer,
+        renamePlanLayer,
+        movePlanLayerUp,
+        movePlanLayerDown,
+        toggleLayerVisible,
+        addSecretCourse,
+        removeSecretCourse,
+        galleryPhotos,
+        memoryRings,
+        addGalleryPhotos,
       }}
     >
       {children}

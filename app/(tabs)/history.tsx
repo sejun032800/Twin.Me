@@ -1,4 +1,10 @@
+import React from 'react';
+import * as Clipboard from 'expo-clipboard';
+import TabTutorialOverlay, { TutorialStep } from '../../src/components/onboarding/TabTutorialOverlay';
+import { useTutorialGuard } from '../../src/hooks/useTutorialGuard';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -47,6 +53,7 @@ import {
 import type { ShuttleResult } from '../../src/services/dateShuttleService';
 import { useGeoLocation } from '../../src/hooks/useGeoLocation';
 import { RelationshipHelix } from '../../src/components/history/RelationshipHelix';
+import { EMOTION_META } from '../../src/services/kakaoHighlightService';
 import {
   FontSize,
   FontWeight,
@@ -128,7 +135,7 @@ function generateRoutePolylineSegments(
 
 // ─── Segmented Control ────────────────────────────────────────────────────────
 
-type TabKey = 'archive' | 'map' | 'helix';
+type TabKey = 'archive' | 'map' | 'feed';
 
 function SegmentedControl({
   active,
@@ -142,7 +149,7 @@ function SegmentedControl({
   const tabs: { key: TabKey; label: string }[] = [
     { key: 'archive', label: '📸  추억 월' },
     { key: 'map',     label: '🗺️  지도' },
-    { key: 'helix',   label: '🧬  나선' },
+    { key: 'feed',    label: '🧭  무드 피드' },
   ];
 
   return (
@@ -208,6 +215,7 @@ const CARD_PALETTES: [string, string, string][] = [
 ];
 
 // ─── MemoryDetailModal ────────────────────────────────────────────────────────
+// Step #53: Enhanced with 3 action buttons — 복사하기, 저장하기, 대화 하이라이트
 
 function MemoryDetailModal({
   node,
@@ -216,7 +224,21 @@ function MemoryDetailModal({
   node: MemoryNode | null;
   onClose: () => void;
 }) {
+  const router = useRouter();
+  const [copied, setCopied] = useState(false);
   if (!node) return null;
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(node.quote);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+  };
+
+  const handleHighlightGallery = () => {
+    onClose();
+    router.push('/highlight-gallery');
+  };
 
   return (
     <Modal
@@ -262,6 +284,35 @@ function MemoryDetailModal({
             </Text>
 
             <Text style={detailS.dateText}>{node.date}</Text>
+
+            {/* ── 3 action buttons ─────────────────────────────────────────── */}
+            <View style={detailS.actionRow}>
+              {/* 복사하기 */}
+              <Pressable style={detailS.actionBtn} onPress={handleCopy}>
+                <Text style={detailS.actionEmoji}>{copied ? '✅' : '📋'}</Text>
+                <Text style={[detailS.actionText, copied && { color: '#4ADE80' }]}>
+                  {copied ? '복사됨' : '복사하기'}
+                </Text>
+              </Pressable>
+
+              {/* 저장하기 (share / 준비 중) */}
+              <Pressable
+                style={detailS.actionBtn}
+                onPress={() => {
+                  // 이미지 저장 기능은 미디어 라이브러리 권한이 필요합니다
+                  Clipboard.setStringAsync(`"${node.quote}" - ${node.date}`);
+                }}
+              >
+                <Text style={detailS.actionEmoji}>💾</Text>
+                <Text style={detailS.actionText}>저장하기</Text>
+              </Pressable>
+
+              {/* 대화 하이라이트 갤러리 */}
+              <Pressable style={detailS.actionBtn} onPress={handleHighlightGallery}>
+                <Text style={detailS.actionEmoji}>🖼️</Text>
+                <Text style={detailS.actionText}>대화 하이라이트</Text>
+              </Pressable>
+            </View>
 
             <Pressable style={detailS.closeBtn} onPress={onClose}>
               <LinearGradient
@@ -329,6 +380,29 @@ const detailS = StyleSheet.create({
     letterSpacing: 0.2,
   },
   dateText: { color: '#475569', fontSize: FontSize.sm },
+  // Action buttons row
+  actionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: 2,
+  },
+  actionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+    backgroundColor: 'rgba(30,41,59,0.8)',
+    gap: 4,
+  },
+  actionEmoji: { fontSize: 20 },
+  actionText: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+    textAlign: 'center',
+  },
   closeBtn: { borderRadius: Radius.xl, overflow: 'hidden', marginTop: 4 },
   closeBtnGrad: { paddingVertical: 12, alignItems: 'center' },
   closeBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },
@@ -2251,7 +2325,7 @@ const locPermS = StyleSheet.create({
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
-  const { dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse } = useAppContext();
+  const { dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel, triggerAddCourse, setTriggerAddCourse, setCurrentOOTD, setCurrentMood } = useAppContext();
   const { historyPlaces, addHistoryPlace, mapPanTarget, panMapTo } = useHistoryContext();
   const { pickPhoto } = usePhotoMetadata();
 
@@ -2425,6 +2499,9 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   // Closes the sheet immediately → shows star particle overlay while Kakao + LLM run
   // Lv1 (보호): empty date history passed to LLM (no personal context)
   const handleMuseSubmit = async (ootd: string, mood: string) => {
+    // FUN-HIS-005: 전역 상태 영속화 → 무드 피드 필터가 실시간 구독
+    setCurrentOOTD(ootd);
+    setCurrentMood(mood);
     setMuseVisible(false);
     setIsLoadingAI(true);
     setRecommendations(null);
@@ -3016,6 +3093,778 @@ const archS = StyleSheet.create({
   },
 });
 
+// ─── FUN-HIS-005: 무드 피드 데이터 & 유틸 ────────────────────────────────────
+
+interface FeedSpot {
+  title: string;
+  latitude: number;
+  longitude: number;
+  category: string;
+}
+
+interface FeedCardData {
+  id: string;
+  tierScore: number;
+  region: string;
+  ootdTags: string[];
+  moodTags: string[];
+  myRating: number;
+  partnerRating: number;
+  comment: string;
+  spots: FeedSpot[];
+}
+
+function getTierInfo(score: number): { emoji: string; label: string } {
+  if (score >= 95) return { emoji: '🏆', label: '환상 속의 신화적 결합' };
+  if (score >= 90) return { emoji: '🧬', label: '영혼까지 닮은 도플갱어' };
+  if (score >= 85) return { emoji: '💖', label: '기적의 소울메이트' };
+  if (score >= 80) return { emoji: '✨', label: '눈빛만 봐도 아는 사이' };
+  if (score >= 75) return { emoji: '🍃', label: '달달한 핑크빛 로맨스' };
+  if (score >= 70) return { emoji: '🌸', label: '다정다감한 모범 커플' };
+  if (score >= 65) return { emoji: '🎭', label: '평소엔 연인, 싸울 땐 웬수' };
+  if (score >= 60) return { emoji: '📉', label: '아슬아슬한 밀당 권태기' };
+  if (score >= 55) return { emoji: '⚡', label: '말 한마디가 시한폭탄' };
+  return { emoji: '🚨', label: '살얼음판 위 대치 상황' };
+}
+
+type FeedSortKey = 'latest' | 'rating' | 'nearby';
+
+const VIRTUAL_FEED: FeedCardData[] = [
+  {
+    id: 'feed-1',
+    tierScore: 88,
+    region: '성수동',
+    ootdTags: ['시크', '캐주얼'],
+    moodTags: ['차분함', '로맨틱'],
+    myRating: 4.8,
+    partnerRating: 4.5,
+    comment: '조용한 카페에서 시작해 서울숲으로 이어지는 여유로운 반나절 코스',
+    spots: [
+      { title: '어니언 성수', latitude: 37.5440, longitude: 127.0568, category: '☕ 카페' },
+      { title: '서울숲 공원', latitude: 37.5444, longitude: 127.0375, category: '🌳 공원' },
+      { title: '뚝섬 한강공원', latitude: 37.5310, longitude: 127.0680, category: '🌊 한강' },
+    ],
+  },
+  {
+    id: 'feed-2',
+    tierScore: 92,
+    region: '홍대',
+    ootdTags: ['페미닌', '캐주얼'],
+    moodTags: ['신남', '힐링'],
+    myRating: 5.0,
+    partnerRating: 4.8,
+    comment: '핫플 카페 홀릭 + 전시회 + 연남동 맛집으로 이어지는 인생 데이트',
+    spots: [
+      { title: '카페 꼼마 홍대', latitude: 37.5570, longitude: 126.9217, category: '☕ 카페' },
+      { title: '무신사 스탠다드 홍대', latitude: 37.5560, longitude: 126.9226, category: '🛍️ 전시' },
+      { title: '연남동 돼지고기 골목', latitude: 37.5593, longitude: 126.9246, category: '🍖 맛집' },
+    ],
+  },
+  {
+    id: 'feed-3',
+    tierScore: 96,
+    region: '경리단길',
+    ootdTags: ['시크'],
+    moodTags: ['로맨틱', '차분함'],
+    myRating: 4.9,
+    partnerRating: 5.0,
+    comment: '경리단길 야경 투어 + 숨겨진 와인바로 완성하는 로맨틱 나이트',
+    spots: [
+      { title: '경리단길 와인바', latitude: 37.5348, longitude: 126.9893, category: '🍷 바' },
+      { title: 'N서울타워 전망대', latitude: 37.5512, longitude: 126.9882, category: '🗼 뷰포인트' },
+      { title: '해방촌 루프탑 카페', latitude: 37.5448, longitude: 126.9869, category: '☕ 루프탑' },
+    ],
+  },
+  {
+    id: 'feed-4',
+    tierScore: 82,
+    region: '압구정',
+    ootdTags: ['캐주얼', '페미닌'],
+    moodTags: ['신남', '차분함'],
+    myRating: 4.6,
+    partnerRating: 4.5,
+    comment: '압구정 갤러리 + 도산공원 카페 + 청담 한강으로 감성 충전 주말',
+    spots: [
+      { title: '도산공원 카페 거리', latitude: 37.5233, longitude: 127.0389, category: '☕ 카페' },
+      { title: '압구정 현대갤러리', latitude: 37.5269, longitude: 127.0339, category: '🖼️ 갤러리' },
+      { title: '청담 한강공원', latitude: 37.5166, longitude: 127.0485, category: '🌊 한강' },
+    ],
+  },
+  {
+    id: 'feed-5',
+    tierScore: 91,
+    region: '북촌',
+    ootdTags: ['캐주얼', '시크'],
+    moodTags: ['힐링', '차분함'],
+    myRating: 4.7,
+    partnerRating: 4.9,
+    comment: '한옥 골목 산책 + 북촌 맛집 + 경복궁 야간 특별관람까지 완벽한 하루',
+    spots: [
+      { title: '북촌 한옥마을', latitude: 37.5826, longitude: 126.9831, category: '🏛️ 관광' },
+      { title: '인사동 카페 골목', latitude: 37.5741, longitude: 126.9851, category: '☕ 카페' },
+      { title: '경복궁 야간관람', latitude: 37.5796, longitude: 126.9770, category: '🌙 야간' },
+    ],
+  },
+];
+
+// ─── MoodFeedCardItem ─────────────────────────────────────────────────────────
+
+function MoodFeedCardItem({
+  card,
+  onSave,
+  saved,
+  t,
+}: {
+  card: FeedCardData;
+  onSave: (card: FeedCardData) => void;
+  saved: boolean;
+  t: ThemeTokens;
+}) {
+  const { emoji, label } = getTierInfo(card.tierScore);
+  const btnScale = useSharedValue(1);
+
+  const handleSave = () => {
+    if (saved) return;
+    // 150ms withSpring 감쇠비 튜닝 → 핑크 하트 전환
+    btnScale.value = withSpring(0.86, { damping: 8, stiffness: 400 }, () => {
+      btnScale.value = withSpring(1, { damping: 14, stiffness: 260 });
+    });
+    onSave(card);
+  };
+
+  const btnAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: btnScale.value }],
+  }));
+
+  const allTagChips = [...card.ootdTags, ...card.moodTags];
+
+  return (
+    <View
+      style={[
+        fcS.card,
+        {
+          backgroundColor: t.isLight
+            ? 'rgba(255,255,255,0.96)'
+            : 'rgba(22,28,45,0.97)',
+          shadowColor: t.isLight ? '#D946EF' : '#7C3AED',
+        },
+      ]}
+    >
+      {/* ── Header: tier badge + region ────────────────────────────────── */}
+      <View style={fcS.header}>
+        <LinearGradient
+          colors={['rgba(124,58,237,0.18)', 'rgba(217,70,239,0.12)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={fcS.tierBadge}
+        >
+          <Text style={fcS.tierEmoji}>{emoji}</Text>
+          <Text style={fcS.tierLabel} numberOfLines={1}>
+            익명의 [{emoji} {label}] 커플
+          </Text>
+        </LinearGradient>
+        <View style={fcS.regionBadge}>
+          <Text style={fcS.regionText}>📍 {card.region}</Text>
+        </View>
+      </View>
+
+      {/* ── Body: mini map placeholder + polyline dots ─────────────────── */}
+      <View
+        style={[
+          fcS.miniMap,
+          {
+            backgroundColor: t.isLight
+              ? 'rgba(241,245,249,0.9)'
+              : 'rgba(10,13,26,0.85)',
+            borderColor: 'rgba(124,58,237,0.22)',
+          },
+        ]}
+      >
+        {/* Route polyline visual */}
+        <View style={fcS.routeRow}>
+          {card.spots.map((spot, idx) => (
+            <React.Fragment key={spot.title}>
+              <View style={fcS.spotPill}>
+                <Text style={fcS.spotCategory}>{spot.category.split(' ')[0]}</Text>
+                <Text style={fcS.spotTitle} numberOfLines={1}>{spot.title}</Text>
+              </View>
+              {idx < card.spots.length - 1 && (
+                <View style={fcS.polylineSegment}>
+                  {[0, 1, 2, 3].map((d) => (
+                    <View key={d} style={fcS.polylineDot} />
+                  ))}
+                  <Text style={fcS.polylineArrow}>›</Text>
+                </View>
+              )}
+            </React.Fragment>
+          ))}
+        </View>
+
+        {/* Mood / OOTD tag chips */}
+        <View style={fcS.tagChipRow}>
+          {allTagChips.map((tag) => (
+            <View key={tag} style={fcS.tagChip}>
+              <Text style={fcS.tagChipText}>{tag}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* ── Footer: dual ratings + comment ─────────────────────────────── */}
+      <View style={fcS.footer}>
+        <View style={fcS.ratingRow}>
+          <View style={fcS.ratingItem}>
+            <Text style={fcS.ratingLabel}>나의 별점</Text>
+            <View style={fcS.ratingValueRow}>
+              <Text style={fcS.ratingStar}>⭐</Text>
+              <Text style={fcS.ratingValue}>{card.myRating.toFixed(1)}</Text>
+            </View>
+          </View>
+          <View style={fcS.ratingDivider} />
+          <View style={fcS.ratingItem}>
+            <Text style={fcS.ratingLabel}>연인의 별점</Text>
+            <View style={fcS.ratingValueRow}>
+              <Text style={fcS.ratingStar}>⭐</Text>
+              <Text style={fcS.ratingValue}>{card.partnerRating.toFixed(1)}</Text>
+            </View>
+          </View>
+        </View>
+        <Text style={[fcS.comment, { color: t.textMuted }]} numberOfLines={2}>
+          "{card.comment}"
+        </Text>
+      </View>
+
+      {/* ── CTA: 코스 내 지도에 담기 ───────────────────────────────────── */}
+      <Animated.View style={[fcS.ctaWrap, btnAnimStyle]}>
+        <Pressable onPress={handleSave} disabled={saved}>
+          <LinearGradient
+            colors={
+              saved
+                ? ['rgba(255,107,139,0.25)', 'rgba(217,70,239,0.15)']
+                : ['#7C3AED', '#D946EF', '#FF6B8B']
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[fcS.ctaGrad, saved && fcS.ctaGradSaved]}
+          >
+            <Text style={[fcS.ctaText, saved && fcS.ctaTextSaved]}>
+              {saved ? '💗 내 지도에 담겼어요!' : '🧭 이 코스 내 지도에 담기'}
+            </Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+const fcS = StyleSheet.create({
+  card: {
+    borderRadius: 24,
+    marginHorizontal: Spacing.base,
+    marginBottom: Spacing.lg,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.22)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    flexWrap: 'wrap',
+  },
+  tierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: Radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+    flex: 1,
+    minWidth: 0,
+  },
+  tierEmoji: { fontSize: 14 },
+  tierLabel: {
+    color: '#C084FC',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    flex: 1,
+  },
+  regionBadge: {
+    backgroundColor: 'rgba(30,41,59,0.6)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.28)',
+  },
+  regionText: {
+    color: '#38BDF8',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+  },
+  // Mini map placeholder
+  miniMap: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  routeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+  },
+  spotPill: {
+    backgroundColor: 'rgba(124,58,237,0.14)',
+    borderRadius: Radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.28)',
+    maxWidth: 90,
+  },
+  spotCategory: { fontSize: 16, lineHeight: 18 },
+  spotTitle: {
+    color: '#F1F5F9',
+    fontSize: 9,
+    fontWeight: FontWeight.semibold,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  polylineSegment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    gap: 2,
+    minWidth: 0,
+  },
+  polylineDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: 'rgba(217,70,239,0.6)',
+  },
+  polylineArrow: {
+    color: '#D946EF',
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
+  },
+  tagChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
+    marginTop: 2,
+  },
+  tagChip: {
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.28)',
+  },
+  tagChipText: {
+    color: '#A78BFA',
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+  },
+  // Footer
+  footer: { gap: Spacing.sm },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  ratingItem: { flex: 1, alignItems: 'center', gap: 2 },
+  ratingLabel: {
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  ratingValueRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  ratingStar: { fontSize: 15 },
+  ratingValue: {
+    color: '#FF6B8B',
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    letterSpacing: -0.3,
+  },
+  ratingDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: 'rgba(124,58,237,0.2)',
+  },
+  comment: {
+    fontSize: FontSize.sm,
+    fontStyle: 'italic',
+    lineHeight: 19,
+  },
+  // CTA
+  ctaWrap: {
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  ctaGrad: {
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  ctaGradSaved: { shadowOpacity: 0 },
+  ctaText: {
+    color: '#fff',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.3,
+  },
+  ctaTextSaved: { color: '#FF6B8B' },
+});
+
+// ─── MoodFeedView ─────────────────────────────────────────────────────────────
+
+function MoodFeedView({ t }: { t: ThemeTokens }) {
+  const { currentOOTD, currentMood, bulkAddDateCourses } = useAppContext();
+
+  const [sortKey, setSortKey] = useState<FeedSortKey>('rating');
+  const [filterActive, setFilterActive] = useState(false);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+
+  // Aurora toggle pulse animation
+  const toggleGlow = useSharedValue(0.6);
+  useEffect(() => {
+    if (filterActive) {
+      toggleGlow.value = withRepeat(
+        withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
+    } else {
+      toggleGlow.value = withTiming(0.6, { duration: 200 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterActive]);
+
+  const toggleGlowStyle = useAnimatedStyle(() => ({
+    opacity: toggleGlow.value,
+  }));
+
+  const showTooltip = filterActive && !currentOOTD && !currentMood;
+
+  // Sort + filter pipeline
+  const visibleCards = useMemo(() => {
+    let cards = [...VIRTUAL_FEED];
+
+    // Sort
+    if (sortKey === 'rating') {
+      cards = cards.sort(
+        (a, b) => (b.myRating + b.partnerRating) / 2 - (a.myRating + a.partnerRating) / 2,
+      );
+    } else if (sortKey === 'latest') {
+      cards = cards.sort((a, b) => parseInt(b.id.replace('feed-', ''), 10) - parseInt(a.id.replace('feed-', ''), 10));
+    }
+    // 'nearby' — keep insertion order (실제 구현 시 geoLocation 기반 정렬)
+
+    // Conditional OOTD/Mood filter
+    if (filterActive && (currentOOTD || currentMood)) {
+      cards = cards.filter((card) => {
+        const ootdMatch = currentOOTD ? card.ootdTags.includes(currentOOTD) : false;
+        const moodMatch = currentMood ? card.moodTags.includes(currentMood) : false;
+        return ootdMatch || moodMatch;
+      });
+    }
+
+    return cards;
+  }, [sortKey, filterActive, currentOOTD, currentMood]);
+
+  const handleSave = (card: FeedCardData) => {
+    if (savedIds.has(card.id)) return;
+    setSavedIds((prev) => new Set([...prev, card.id]));
+
+    const today = new Date().toISOString().split('T')[0];
+    const newCourses: DateCourse[] = card.spots.map((spot, i) => ({
+      id: `feed-${card.id}-${i}-${Date.now()}`,
+      title: spot.title,
+      date: today,
+      latitude: spot.latitude,
+      longitude: spot.longitude,
+      myRating: 0,
+      myReview: `[ 무드 피드 복사 · ${card.region} 코스 ]`,
+      partnerRating: 0,
+      partnerReview: '',
+    }));
+    bulkAddDateCourses(newCourses);
+    try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+  };
+
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingTop: Spacing.md, paddingBottom: STATS_BAR_H + TabBar.height + 40 }}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* ── OOTD & 무드 필터 토글 ────────────────────────────────────────── */}
+      <View style={feedS.filterSection}>
+        {/* Aurora 테두리 토글 버튼 */}
+        <Pressable onPress={() => setFilterActive((v) => !v)} style={feedS.filterToggleWrap}>
+          {/* Aurora glow ring */}
+          <Animated.View
+            style={[StyleSheet.absoluteFill, { borderRadius: 20 }, toggleGlowStyle]}
+            pointerEvents="none"
+          >
+            <LinearGradient
+              colors={filterActive
+                ? ['#7C3AED', '#D946EF', '#FF6B8B', '#7C3AED']
+                : ['rgba(124,58,237,0.25)', 'rgba(217,70,239,0.18)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{ flex: 1, borderRadius: 20 }}
+            />
+          </Animated.View>
+          <LinearGradient
+            colors={filterActive
+              ? ['rgba(124,58,237,0.22)', 'rgba(217,70,239,0.15)']
+              : ['rgba(30,41,59,0.9)', 'rgba(22,20,40,0.95)']}
+            style={feedS.filterToggleInner}
+          >
+            <Text style={feedS.filterToggleEmoji}>✨</Text>
+            <Text style={[feedS.filterToggleText, filterActive && feedS.filterToggleTextOn]}>
+              내 현재 OOTD & 무드 코스만 보기
+            </Text>
+            <View style={[feedS.filterTogglePill, filterActive && feedS.filterTogglePillOn]}>
+              <Text style={feedS.filterTogglePillText}>{filterActive ? 'ON' : 'OFF'}</Text>
+            </View>
+          </LinearGradient>
+        </Pressable>
+
+        {/* OOTD/무드 미선택 시 툴팁 */}
+        {showTooltip && (
+          <View style={feedS.tooltip}>
+            <Text style={feedS.tooltipText}>
+              💡 AI 뮤즈에게 오늘의 무드를 먼저 알려주세요{'\n'}
+              (🗺️ 지도 탭 → ✨ AI 뮤즈 버튼)
+            </Text>
+          </View>
+        )}
+
+        {/* 현재 선택된 OOTD/무드 표시 */}
+        {filterActive && (currentOOTD || currentMood) && (
+          <View style={feedS.activeFilterRow}>
+            {currentOOTD && (
+              <View style={feedS.activeFilterChip}>
+                <Text style={feedS.activeFilterChipText}>👗 {currentOOTD}</Text>
+              </View>
+            )}
+            {currentMood && (
+              <View style={feedS.activeFilterChip}>
+                <Text style={feedS.activeFilterChipText}>💫 {currentMood}</Text>
+              </View>
+            )}
+            <Text style={feedS.activeFilterHint}>에 맞는 코스만 표시 중</Text>
+          </View>
+        )}
+      </View>
+
+      {/* ── 정렬 필터 칩 ──────────────────────────────────────────────────── */}
+      <View style={feedS.sortRow}>
+        {([
+          { key: 'rating' as FeedSortKey, label: '⭐ 별점순' },
+          { key: 'latest' as FeedSortKey, label: '🕐 최신순' },
+          { key: 'nearby' as FeedSortKey, label: '📍 내 지역' },
+        ] as const).map(({ key, label }) => (
+          <Pressable
+            key={key}
+            style={[feedS.sortChip, sortKey === key && feedS.sortChipOn]}
+            onPress={() => setSortKey(key)}
+          >
+            <Text style={[feedS.sortChipText, sortKey === key && feedS.sortChipTextOn]}>
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* ── 피드 카드 리스트 ──────────────────────────────────────────────── */}
+      {visibleCards.length === 0 ? (
+        <View style={feedS.emptyWrap}>
+          <LinearGradient
+            colors={['rgba(124,58,237,0.12)', 'rgba(217,70,239,0.08)']}
+            style={feedS.emptyCard}
+          >
+            <Text style={feedS.emptyEmoji}>🧭</Text>
+            <Text style={[feedS.emptyTitle, { color: t.text }]}>
+              조건에 맞는 코스가 없어요
+            </Text>
+            <Text style={[feedS.emptyDesc, { color: t.textMuted }]}>
+              필터를 해제하거나 AI 뮤즈에서{'\n'}다른 OOTD / 무드를 선택해보세요
+            </Text>
+          </LinearGradient>
+        </View>
+      ) : (
+        visibleCards.map((card) => (
+          <MoodFeedCardItem
+            key={card.id}
+            card={card}
+            saved={savedIds.has(card.id)}
+            onSave={handleSave}
+            t={t}
+          />
+        ))
+      )}
+    </ScrollView>
+  );
+}
+
+const feedS = StyleSheet.create({
+  filterSection: {
+    paddingHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  filterToggleWrap: {
+    borderRadius: 20,
+    overflow: 'visible',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.45)',
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  filterToggleInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 13,
+    borderRadius: 19,
+  },
+  filterToggleEmoji: { fontSize: 18 },
+  filterToggleText: {
+    flex: 1,
+    color: '#94A3B8',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  filterToggleTextOn: { color: '#F1F5F9' },
+  filterTogglePill: {
+    backgroundColor: 'rgba(30,41,59,0.8)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.3)',
+  },
+  filterTogglePillOn: {
+    backgroundColor: 'rgba(124,58,237,0.3)',
+    borderColor: '#D946EF',
+  },
+  filterTogglePillText: {
+    color: '#D946EF',
+    fontSize: 10,
+    fontWeight: FontWeight.extrabold,
+    letterSpacing: 0.5,
+  },
+  tooltip: {
+    backgroundColor: 'rgba(30,41,59,0.92)',
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+  },
+  tooltipText: {
+    color: '#FCD34D',
+    fontSize: FontSize.xs,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  activeFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
+  },
+  activeFilterChip: {
+    backgroundColor: 'rgba(124,58,237,0.22)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#D946EF',
+  },
+  activeFilterChipText: {
+    color: '#F1F5F9',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+  },
+  activeFilterHint: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+  },
+  // Sort chips
+  sortRow: {
+    flexDirection: 'row',
+    paddingHorizontal: Spacing.base,
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  sortChip: {
+    backgroundColor: 'rgba(30,41,59,0.8)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.2)',
+  },
+  sortChipOn: {
+    backgroundColor: 'rgba(124,58,237,0.22)',
+    borderColor: '#7C3AED',
+  },
+  sortChipText: {
+    color: '#64748B',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+  },
+  sortChipTextOn: { color: '#F1F5F9' },
+  // Empty state
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingTop: 40,
+  },
+  emptyCard: {
+    width: '100%',
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.25)',
+  },
+  emptyEmoji: { fontSize: 48 },
+  emptyTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center' },
+  emptyDesc: { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 20 },
+});
+
 // ─── HelixView ────────────────────────────────────────────────────────────────
 // Step #33 + Step #50: DNA 나선 탭 래퍼.
 // memorySentences(AI 선별) + useMemoryWall(로컬 발렌스) 병합.
@@ -3023,11 +3872,11 @@ const archS = StyleSheet.create({
 
 function HelixView() {
   const valenceMemories = useMemoryWall(5);
-  const { memorySentences, themeTokens: t } = useAppContext();
+  const { memorySentences, highlightCards, themeTokens: t } = useAppContext();
   const [height, setHeight] = useState(SH * 0.68);
 
   // AI 선별 KakaoSyncRecord → MemoryNode 변환 (상위 5개)
-  const aiMemories: import('../../src/hooks/useMemoryWall').MemoryNode[] = memorySentences
+  const aiMemories: MemoryNode[] = memorySentences
     .slice(0, 5)
     .map((r) => ({
       id: `sync-${r.id}`,
@@ -3040,12 +3889,32 @@ function HelixView() {
       imageUri: null,
     }));
 
-  // 병합 (중복 id 제거) — AI 선별을 앞에 배치
-  const existingIds = new Set(aiMemories.map((m) => m.id));
+  // 4감정 HighlightCard → MemoryNode 변환 (상위 4개, 감정별 1개)
+  const emotionNodes: MemoryNode[] = (['caring', 'funny', 'touching', 'random'] as const)
+    .map((emotion) => {
+      const card = highlightCards.find((c) => c.emotion === emotion);
+      if (!card) return null;
+      const meta = EMOTION_META[emotion];
+      return {
+        id: `emo-${card.id}`,
+        date: card.date,
+        rawDate: new Date(card.date),
+        quote: card.text,
+        tag: `${meta.emoji} ${meta.label}`,
+        speaker: 'partner' as const,
+        valenceScore: 9,
+        imageUri: null,
+      } as MemoryNode;
+    })
+    .filter((n): n is MemoryNode => n !== null);
+
+  // 병합 (중복 id 제거) — 감정노드 → AI 선별 → 발렌스 순
+  const existingIds = new Set([...emotionNodes, ...aiMemories].map((m) => m.id));
   const mergedMemories = [
-    ...aiMemories,
-    ...valenceMemories.filter((m) => !existingIds.has(m.id)).slice(0, 5),
-  ].slice(0, 9);
+    ...emotionNodes,
+    ...aiMemories.filter((m) => !existingIds.has(m.id)),
+    ...valenceMemories.filter((m) => !existingIds.has(m.id)).slice(0, 4),
+  ].slice(0, 10);
 
   return (
     <View
@@ -3115,19 +3984,61 @@ function HistoryScreenContent() {
   const [activeTab, setActiveTab] = useState<TabKey>('archive');
   const { themeTokens } = useAppContext();
   const t = themeTokens;
+  const { shouldShow, markDone } = useTutorialGuard('history');
+
+  const refSegment = useRef<View>(null);
+  const refHeader = useRef<View>(null);
+  const refContent = useRef<View>(null);
+
+  const tutorialSteps: TutorialStep[] = [
+    {
+      targetRef: refHeader,
+      title: '📸 추억 아카이브',
+      description: '카카오톡에서 선별된 감동 순간들이 폴라로이드 카드로 펼쳐져요.',
+      arrowDir: 'below',
+      pad: 12,
+    },
+    {
+      targetRef: refSegment,
+      title: '🗂️ 탭 전환',
+      description: '추억 월 · 데이트 지도 · 무드 피드 세 가지 뷰로 커플의 추억을 탐색해요.',
+      arrowDir: 'below',
+      pad: 8,
+    },
+    {
+      targetRef: refContent,
+      title: '🧭 무드 피드',
+      description: '"무드 피드" 탭에서 AI 뮤즈 무드 필터로 찐 커플 추천 코스를 탐색하세요!',
+      arrowDir: 'above',
+      pad: 16,
+    },
+  ];
 
   return (
     <SafeAreaView edges={['top']} style={[screenS.root, { backgroundColor: t.bg }]}>
-      <ScreenHeader t={t} />
-      <SegmentedControl active={activeTab} onChange={setActiveTab} t={t} />
+      <View ref={refHeader} collapsable={false}>
+        <ScreenHeader t={t} />
+      </View>
+      <View ref={refSegment} collapsable={false}>
+        <SegmentedControl active={activeTab} onChange={setActiveTab} t={t} />
+      </View>
 
-      {activeTab === 'archive' ? (
-        <ArchiveView t={t} />
-      ) : activeTab === 'map' ? (
-        <DateMapView t={t} />
-      ) : (
-        <HelixView />
-      )}
+      <View ref={refContent} collapsable={false} style={{ flex: 1 }}>
+        {activeTab === 'archive' ? (
+          <ArchiveView t={t} />
+        ) : activeTab === 'map' ? (
+          <DateMapView t={t} />
+        ) : (
+          <MoodFeedView t={t} />
+        )}
+      </View>
+
+      {/* ── 신규 유저 스포트라이트 튜토리얼 ── */}
+      <TabTutorialOverlay
+        steps={tutorialSteps}
+        visible={shouldShow}
+        onDone={markDone}
+      />
     </SafeAreaView>
   );
 }

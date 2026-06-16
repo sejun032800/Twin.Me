@@ -24,6 +24,32 @@ export const LightBrandTokens = {
   NEUTRAL:   '#7B7676',
 } as const;
 
+// ─── Interpolated Blend Colors (RGB midpoints between anchor pairs) ───────────
+//
+// Dark Theme: all values are floor((A + B) / 2) per RGB channel.
+//   PRIMARY_SECONDARY : midpoint(#F48FB1, #CE93D8) → R225 G145 B196 → #E191C4
+//   SECONDARY_TERTIARY: midpoint(#CE93D8, #1A1A2E) → R116 G86  B131 → #745683
+//   TERTIARY_NEUTRAL  : midpoint(#1A1A2E, #807477) → R77  G71  B82  → #4D4752
+//   BG_SURFACE        : 25% blend Tertiary→Secondary → deep plum surface
+export const DarkBlends = {
+  PRIMARY_SECONDARY:  '#E191C4',
+  SECONDARY_TERTIARY: '#745683',
+  TERTIARY_NEUTRAL:   '#4D4752',
+  BG_SURFACE:         '#231B35',
+} as const;
+
+// Light Theme:
+//   PRIMARY_SECONDARY : midpoint(#70585B, #725477) → R113 G86 B105 → #715669
+//   SECONDARY_TERTIARY: midpoint(#725477, #5355AA) → R98  G84 B144 → #625490
+//   TERTIARY_NEUTRAL  : midpoint(#5355AA, #7B7676) → R103 G101 B144 → #676590
+//   BG_SURFACE        : warm white with subtle purple tint
+export const LightBlends = {
+  PRIMARY_SECONDARY:  '#715669',
+  SECONDARY_TERTIARY: '#625490',
+  TERTIARY_NEUTRAL:   '#676590',
+  BG_SURFACE:         '#F5F1F8',
+} as const;
+
 // ─── Brand Color Palette ────────────────────────────────────────────────────
 
 export const Colors = {
@@ -96,6 +122,41 @@ export const Gradients = {
   },
 } as const;
 
+// ─── Theme Gradient Sub-type ───────────────────────────────────────────────────
+// All gradient arrays are pre-typed tuples for type-safe LinearGradient binding.
+
+export interface ThemeGradients {
+  /** Primary → Secondary (diagonal accent, e.g. active badges) */
+  primaryToSecondary: readonly [string, string];
+  /** Deep background — 3-stop sweep from darkest to surface tint */
+  bgDeep: readonly [string, string, string];
+  /** Card/container backdrop — 2-stop depth layer */
+  cardBackdrop: readonly [string, string];
+  /** DNA Helix Strand A — warm spectrum: secondaryTertiary blend → primary */
+  helixStrandA: readonly [string, string, string, string];
+  /** DNA Helix Strand B — cool/depth spectrum anchored at tertiary */
+  helixStrandB: readonly [string, string, string, string];
+  /** Map / bottom sheet inner background — 3-stop deep gradient */
+  mapBottomSheet: readonly [string, string, string];
+  /** Gallery card border shimmer — secondary → blend → primary */
+  galleryCardBorder: readonly [string, string, string];
+  /** Full spectral sweep — primary → secondary → secondaryTertiary → tertiary */
+  fullSpectrum: readonly [string, string, string, string];
+}
+
+// ─── Theme Blend Sub-type ─────────────────────────────────────────────────────
+
+export interface ThemeBlends {
+  /** Midpoint between Primary and Secondary anchor colors */
+  primarySecondary: string;
+  /** Midpoint between Secondary and Tertiary anchor colors */
+  secondaryTertiary: string;
+  /** Midpoint between Tertiary and Neutral anchor colors */
+  tertiaryNeutral: string;
+  /** Slightly elevated surface for layering depth (above bg) */
+  bgSurface: string;
+}
+
 // ─── Theme Tokens ─────────────────────────────────────────────────────────────
 
 export interface ThemeTokens {
@@ -116,6 +177,15 @@ export interface ThemeTokens {
   segmentTrack: string;
   isLight: boolean;
   gradientColors: readonly [string, string, string];
+  // ── Anchor Colors (最上位 포인트 컬러 — 직접 사용) ──────────────────────────
+  primary: string;
+  secondary: string;
+  tertiary: string;
+  neutral: string;
+  // ── Interpolated Blends (베이스·서포트 레이어 전용) ─────────────────────────
+  blends: ThemeBlends;
+  // ── Pre-composed Gradient Arrays (LinearGradient colors 바인딩 전용) ─────────
+  gradients: ThemeGradients;
 }
 
 export const LIGHT_THEME: ThemeTokens = {
@@ -135,7 +205,45 @@ export const LIGHT_THEME: ThemeTokens = {
   headerBg: '#F9F6F7',
   segmentTrack: '#EDE8EA',
   isLight: true,
-  gradientColors: ['#70585B', '#725477', '#5355AA'],  // PRIMARY → SECONDARY → TERTIARY
+  gradientColors: [LightBrandTokens.PRIMARY, LightBrandTokens.SECONDARY, LightBrandTokens.TERTIARY],
+  // Anchor colors
+  primary:   LightBrandTokens.PRIMARY,
+  secondary: LightBrandTokens.SECONDARY,
+  tertiary:  LightBrandTokens.TERTIARY,
+  neutral:   LightBrandTokens.NEUTRAL,
+  // Interpolated blends
+  blends: {
+    primarySecondary:  LightBlends.PRIMARY_SECONDARY,
+    secondaryTertiary: LightBlends.SECONDARY_TERTIARY,
+    tertiaryNeutral:   LightBlends.TERTIARY_NEUTRAL,
+    bgSurface:         LightBlends.BG_SURFACE,
+  },
+  // Pre-composed gradient arrays
+  gradients: {
+    primaryToSecondary: [LightBrandTokens.PRIMARY, LightBrandTokens.SECONDARY],
+    bgDeep:             ['#F9F6F7', '#EEE8EF', '#E5DFF0'],
+    cardBackdrop:       ['#FFFFFF', LightBlends.BG_SURFACE],
+    helixStrandA: [
+      LightBlends.SECONDARY_TERTIARY,
+      LightBrandTokens.SECONDARY,
+      LightBlends.PRIMARY_SECONDARY,
+      LightBrandTokens.PRIMARY,
+    ],
+    helixStrandB: [
+      LightBrandTokens.TERTIARY,
+      LightBlends.TERTIARY_NEUTRAL,
+      LightBrandTokens.NEUTRAL,
+      '#A09D9D',
+    ],
+    mapBottomSheet:   ['#FFFFFF', LightBlends.BG_SURFACE, '#EDE8EF'],
+    galleryCardBorder: [LightBrandTokens.SECONDARY, LightBlends.PRIMARY_SECONDARY, LightBrandTokens.PRIMARY],
+    fullSpectrum: [
+      LightBrandTokens.PRIMARY,
+      LightBrandTokens.SECONDARY,
+      LightBlends.SECONDARY_TERTIARY,
+      LightBrandTokens.TERTIARY,
+    ],
+  },
 };
 
 export const DARK_THEME: ThemeTokens = {
@@ -155,7 +263,45 @@ export const DARK_THEME: ThemeTokens = {
   headerBg: '#1A1A2E',     // BrandTokens.TERTIARY
   segmentTrack: '#1E293B',
   isLight: false,
-  gradientColors: ['#F48FB1', '#CE93D8', '#7C3AED'],  // PRIMARY → SECONDARY → violet
+  gradientColors: [BrandTokens.PRIMARY, BrandTokens.SECONDARY, DarkBlends.SECONDARY_TERTIARY],
+  // Anchor colors
+  primary:   BrandTokens.PRIMARY,
+  secondary: BrandTokens.SECONDARY,
+  tertiary:  BrandTokens.TERTIARY,
+  neutral:   BrandTokens.NEUTRAL,
+  // Interpolated blends
+  blends: {
+    primarySecondary:  DarkBlends.PRIMARY_SECONDARY,
+    secondaryTertiary: DarkBlends.SECONDARY_TERTIARY,
+    tertiaryNeutral:   DarkBlends.TERTIARY_NEUTRAL,
+    bgSurface:         DarkBlends.BG_SURFACE,
+  },
+  // Pre-composed gradient arrays
+  gradients: {
+    primaryToSecondary: [BrandTokens.PRIMARY, BrandTokens.SECONDARY],
+    bgDeep:             ['#0A0A1A', BrandTokens.TERTIARY, DarkBlends.BG_SURFACE],
+    cardBackdrop:       [BrandTokens.TERTIARY, DarkBlends.BG_SURFACE],
+    helixStrandA: [
+      DarkBlends.SECONDARY_TERTIARY,
+      BrandTokens.SECONDARY,
+      DarkBlends.PRIMARY_SECONDARY,
+      BrandTokens.PRIMARY,
+    ],
+    helixStrandB: [
+      '#0A0A1A',
+      BrandTokens.TERTIARY,
+      '#2D1E3E',
+      DarkBlends.TERTIARY_NEUTRAL,
+    ],
+    mapBottomSheet:    [BrandTokens.TERTIARY, DarkBlends.BG_SURFACE, '#2D1E3E'],
+    galleryCardBorder: [BrandTokens.SECONDARY, DarkBlends.PRIMARY_SECONDARY, BrandTokens.PRIMARY],
+    fullSpectrum: [
+      BrandTokens.PRIMARY,
+      BrandTokens.SECONDARY,
+      DarkBlends.SECONDARY_TERTIARY,
+      BrandTokens.TERTIARY,
+    ],
+  },
 };
 
 export type ThemeMode = 'light' | 'dark';
@@ -221,6 +367,36 @@ export const LineHeight = {
   tight: 1.2,
   normal: 1.5,
   relaxed: 1.75,
+} as const;
+
+// ─── Typography Presets ──────────────────────────────────────────────────────
+// 컴포넌트에서 `style={Typography.bodyMd}` 형태로 사용한다.
+// fontFamily는 _layout.tsx defaultProps로 자동 주입되므로
+// 여기서는 굵기·크기·행간만 명시해 충돌을 방지한다.
+
+export const Typography = {
+  // Display
+  display:    { fontFamily: FontFamily.bold,    fontSize: FontSize['3xl'], lineHeight: FontSize['3xl'] * 1.2 },
+  headline:   { fontFamily: FontFamily.bold,    fontSize: FontSize['2xl'], lineHeight: FontSize['2xl'] * 1.2 },
+
+  // Title
+  titleLg:    { fontFamily: FontFamily.bold,    fontSize: FontSize.xl,    lineHeight: FontSize.xl  * 1.3 },
+  titleMd:    { fontFamily: FontFamily.medium,  fontSize: FontSize.lg,    lineHeight: FontSize.lg  * 1.3 },
+  titleSm:    { fontFamily: FontFamily.medium,  fontSize: FontSize.md,    lineHeight: FontSize.md  * 1.4 },
+
+  // Body
+  bodyLg:     { fontFamily: FontFamily.regular, fontSize: FontSize.md,    lineHeight: FontSize.md  * 1.6 },
+  bodyMd:     { fontFamily: FontFamily.regular, fontSize: FontSize.base,  lineHeight: FontSize.base * 1.6 },
+  bodySm:     { fontFamily: FontFamily.regular, fontSize: FontSize.sm,    lineHeight: FontSize.sm  * 1.6 },
+
+  // Label / Caption
+  labelMd:    { fontFamily: FontFamily.medium,  fontSize: FontSize.sm,    lineHeight: FontSize.sm  * 1.4 },
+  labelSm:    { fontFamily: FontFamily.medium,  fontSize: FontSize.xs,    lineHeight: FontSize.xs  * 1.4 },
+  caption:    { fontFamily: FontFamily.light,   fontSize: FontSize.xs,    lineHeight: FontSize.xs  * 1.5 },
+
+  // Emphasis
+  boldMd:     { fontFamily: FontFamily.bold,    fontSize: FontSize.base,  lineHeight: FontSize.base * 1.5 },
+  boldSm:     { fontFamily: FontFamily.bold,    fontSize: FontSize.sm,    lineHeight: FontSize.sm  * 1.5 },
 } as const;
 
 // ─── Shadows ─────────────────────────────────────────────────────────────────

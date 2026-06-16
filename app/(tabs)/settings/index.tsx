@@ -1,4 +1,7 @@
+import React from 'react';
 import * as DocumentPicker from 'expo-document-picker';
+import TabTutorialOverlay, { TutorialStep } from '../../../src/components/onboarding/TabTutorialOverlay';
+import { useTutorialGuard } from '../../../src/hooks/useTutorialGuard';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -2420,6 +2423,44 @@ export default function SettingsScreen() {
   const [privacySyncError, setPrivacySyncError] = useState(false);
   const [showThemeShop, setShowThemeShop] = useState(false);
   const [showHelpCenter, setShowHelpCenter] = useState(false);
+  const { shouldShow, markDone } = useTutorialGuard('settings');
+
+  // Tutorial spotlight refs
+  const refProfile = useRef<View>(null);
+  const refPrivacy = useRef<View>(null);
+  const refKakaoSync = useRef<View>(null);
+  const refPremium = useRef<View>(null);
+
+  const tutorialSteps: TutorialStep[] = [
+    {
+      targetRef: refProfile,
+      title: '👤 내 프로필',
+      description: '이름, MBTI, 애니어그램을 설정하면 AI가 당신의 말투를 더 정확하게 학습해요.',
+      arrowDir: 'below',
+      pad: 12,
+    },
+    {
+      targetRef: refPrivacy,
+      title: '🔒 프라이버시 레벨',
+      description: '슬라이더로 AI 데이터 활용 범위를 조절하세요. 언제든 변경 가능해요.',
+      arrowDir: 'below',
+      pad: 10,
+    },
+    {
+      targetRef: refKakaoSync,
+      title: '🔄 추억 동기화',
+      description: '카카오톡 대화 파일을 업로드하면 AI가 감동 순간을 자동으로 선별해요.',
+      arrowDir: 'above',
+      pad: 10,
+    },
+    {
+      targetRef: refPremium,
+      title: '✨ 프리미엄 플랜',
+      description: '무제한 AI 답장, 주간 리포트, 위기 감지 등 프리미엄 기능을 해금하세요.',
+      arrowDir: 'above',
+      pad: 12,
+    },
+  ];
 
   // Auto-dismiss snackbar after 3.5 s
   useEffect(() => {
@@ -2434,8 +2475,11 @@ export default function SettingsScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!shouldShow}
       >
-        <ProfileHeader t={t} />
+        <View ref={refProfile} collapsable={false}>
+          <ProfileHeader t={t} />
+        </View>
 
         <View style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>화면 테마</Text>
@@ -2447,7 +2491,7 @@ export default function SettingsScreen() {
           <ThemeShopEntryCard t={t} onPress={() => setShowThemeShop(true)} />
         </View>
 
-        <View style={styles.sectionBlock}>
+        <View ref={refPrivacy} collapsable={false} style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>프라이버시</Text>
           <PrivacySlider t={t} onSyncError={() => setPrivacySyncError(true)} />
         </View>
@@ -2457,12 +2501,12 @@ export default function SettingsScreen() {
           <MemoryEraser t={t} />
         </View>
 
-        <View style={styles.sectionBlock}>
+        <View ref={refKakaoSync} collapsable={false} style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>추억 동기화</Text>
           <KakaoSyncSection t={t} />
         </View>
 
-        <View style={styles.sectionBlock}>
+        <View ref={refPremium} collapsable={false} style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>프리미엄 플랜</Text>
           <SubscriptionStore />
         </View>
@@ -2488,6 +2532,13 @@ export default function SettingsScreen() {
 
       {/* In-app Help Center modal (Step #42) */}
       <HelpCenter visible={showHelpCenter} onClose={() => setShowHelpCenter(false)} t={t} />
+
+      {/* ── 신규 유저 스포트라이트 튜토리얼 ── */}
+      <TabTutorialOverlay
+        steps={tutorialSteps}
+        visible={shouldShow}
+        onDone={markDone}
+      />
     </SafeAreaView>
   );
 }

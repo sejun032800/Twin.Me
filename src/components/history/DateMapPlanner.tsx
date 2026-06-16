@@ -26,6 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { DateCourse } from '../../context/AppContext';
+import { useAppContext } from '../../context/AppContext';
 import { FontSize, FontWeight, Radius, Spacing } from '../../styles/theme';
 import type { BudgetRange, CandidatePlace } from '../../utils/courseRecommendation';
 import { BudgetRangeSlider } from '../ui/BudgetRangeSlider';
@@ -46,24 +47,31 @@ export interface LayerFilterChipsProps {
 }
 
 export function LayerFilterChips({ pending, archive, onChange }: LayerFilterChipsProps) {
+  const { themeTokens } = useAppContext();
   return (
     <View style={layerS.wrap} pointerEvents="box-none">
       <View style={layerS.chips}>
         <Pressable
-          style={[layerS.chip, pending && layerS.chipPink]}
+          style={[
+            layerS.chip,
+            pending && { borderColor: themeTokens.primary + 'A5', backgroundColor: themeTokens.primary + '1E' },
+          ]}
           onPress={() => onChange(!pending, archive)}
           accessibilityLabel="예정된 코스 레이어 토글"
         >
-          <View style={[layerS.dot, { backgroundColor: '#FF6B8B' }]} />
+          <View style={[layerS.dot, { backgroundColor: themeTokens.primary, shadowColor: themeTokens.primary }]} />
           <Text style={[layerS.chipTxt, pending && layerS.chipTxtOn]}>✈️ 예정</Text>
         </Pressable>
 
         <Pressable
-          style={[layerS.chip, archive && layerS.chipPurple]}
+          style={[
+            layerS.chip,
+            archive && { borderColor: themeTokens.secondary + 'A5', backgroundColor: themeTokens.secondary + '1E' },
+          ]}
           onPress={() => onChange(pending, !archive)}
           accessibilityLabel="추억 아카이브 레이어 토글"
         >
-          <View style={[layerS.dot, { backgroundColor: '#A855F7' }]} />
+          <View style={[layerS.dot, { backgroundColor: themeTokens.secondary, shadowColor: themeTokens.secondary }]} />
           <Text style={[layerS.chipTxt, archive && layerS.chipTxtOn]}>💜 추억</Text>
         </Pressable>
       </View>
@@ -121,9 +129,10 @@ const layerS = StyleSheet.create({
 // ─── TimelineSlotCard ─────────────────────────────────────────────────────────
 
 function TimelineSlotCard({ course, index }: { course: DateCourse; index: number }) {
+  const { themeTokens } = useAppContext();
   const isAnchor = index === 0;
   const gradColors: [string, string] = isAnchor
-    ? ['#FF6B8B', '#D946EF']
+    ? [themeTokens.primary, themeTokens.secondary]
     : ['#4ADE80', '#22D3EE'];
 
   return (
@@ -136,10 +145,10 @@ function TimelineSlotCard({ course, index }: { course: DateCourse; index: number
         </LinearGradient>
       </View>
 
-      <View style={[tlS.card, isAnchor && tlS.cardAnchor]}>
+      <View style={[tlS.card, isAnchor && { borderColor: themeTokens.primary + '66', backgroundColor: themeTokens.primary + '14' }]}>
         <Text style={tlS.cardTitle} numberOfLines={1}>{course.title}</Text>
         <Text style={tlS.cardDate}>{course.date}</Text>
-        {isAnchor && <Text style={tlS.anchorLabel}>시작 앵커</Text>}
+        {isAnchor && <Text style={[tlS.anchorLabel, { color: themeTokens.primary }]}>시작 앵커</Text>}
       </View>
     </View>
   );
@@ -318,6 +327,7 @@ export default function DateMapPlanner({
   onBudgetChange,
   totalConfirmedBudget,
 }: DateMapPlannerProps) {
+  const { themeTokens } = useAppContext();
   const slideY = useSharedValue(500);
   const prevSlotsLen = useRef(plannerSlots.length);
 
@@ -358,7 +368,9 @@ export default function DateMapPlanner({
       {/* Sliding sheet */}
       <Animated.View style={[plannerS.sheet, sheetStyle]}>
         <LinearGradient
-          colors={['rgba(15,20,40,0.99)', 'rgba(10,13,26,1)']}
+          colors={themeTokens.gradients.mapBottomSheet}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
           style={plannerS.inner}
         >
           <View style={plannerS.handle} />
@@ -366,7 +378,7 @@ export default function DateMapPlanner({
           {/* Header */}
           <View style={plannerS.headerRow}>
             <LinearGradient
-              colors={['#4ADE80', '#22D3EE']}
+              colors={themeTokens.gradients.primaryToSecondary}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={plannerS.headerBadge}

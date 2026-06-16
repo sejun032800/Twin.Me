@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import TabTutorialOverlay, { TutorialStep } from '../../src/components/onboarding/TabTutorialOverlay';
+import { useTutorialGuard } from '../../src/hooks/useTutorialGuard';
 import {
   Alert,
   FlatList,
@@ -1445,6 +1447,8 @@ function ChatRoomView({
     addMemorySentences,
     lastKakaoSyncTimestamp,
     setLastKakaoSyncTimestamp,
+    triggerMirrorMode,
+    setTriggerMirrorMode,
   } = useAppContext();
 
   // Step #40: derive deep inference flag from subscription plan
@@ -1520,6 +1524,15 @@ function ChatRoomView({
       crisisModalShownRef.current = false;
     }
   }, [crisisResult?.crisisModalTrigger]);
+
+  // FUN-HOM-002 크로스 탭 라우팅: 홈 오버플로우 CRITICAL_LOSS 배너 → FUN-CHA-003 강제 발동
+  useEffect(() => {
+    if (triggerMirrorMode) {
+      setTriggerMirrorMode(false);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      setTimeout(() => setCrisisVisible(true), 400);
+    }
+  }, [triggerMirrorMode]);
 
   const addMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -2278,6 +2291,36 @@ function DMListView({
   partnerName: string; onEnterRoom: (room: RoomType) => void; t: ThemeTokens; toneAlertCount: number;
 }) {
   const { isEarlyDatingMode, setIsEarlyDatingMode } = useAppContext();
+  const { shouldShow, markDone } = useTutorialGuard('chat');
+
+  const refPartnerRow = useRef<View>(null);
+  const refAiRow = useRef<View>(null);
+  const refAnalystRow = useRef<View>(null);
+  const refTipBox = useRef<View>(null);
+
+  const tutorialSteps: TutorialStep[] = [
+    {
+      targetRef: refPartnerRow,
+      title: '❤️ 파트너 채팅방',
+      description: '카카오톡을 연동하면 실제 연인과의 대화를 AI가 분석해 드려요.',
+      arrowDir: 'below',
+      pad: 10,
+    },
+    {
+      targetRef: refAiRow,
+      title: '💜 파트너 AI',
+      description: '파트너의 말투와 성격을 학습한 AI가 대신 답장 초안을 생성해요.',
+      arrowDir: 'below',
+      pad: 10,
+    },
+    {
+      targetRef: refAnalystRow,
+      title: '🔬 분석가 트윈이',
+      description: '매주 연애 리포트와 위기 신호를 감지해 알려드려요.',
+      arrowDir: 'above',
+      pad: 10,
+    },
+  ];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]} edges={['top']}>
@@ -2288,13 +2331,15 @@ function DMListView({
       <View style={[styles.listDivider, { backgroundColor: t.divider }]} />
 
       <Animated.View entering={FadeIn.duration(300)} style={styles.dmList}>
-        <Animated.View entering={FadeInRight.delay(0).duration(300)}>
-          <DMRow
-            emoji="❤️" name={partnerName}
-            preview="카카오톡 연동 · 실제 연인 채팅방" time="지금"
-            onPress={() => onEnterRoom('partner')} t={t} isPartner
-          />
-        </Animated.View>
+        <View ref={refPartnerRow} collapsable={false}>
+          <Animated.View entering={FadeInRight.delay(0).duration(300)}>
+            <DMRow
+              emoji="❤️" name={partnerName}
+              preview="카카오톡 연동 · 실제 연인 채팅방" time="지금"
+              onPress={() => onEnterRoom('partner')} t={t} isPartner
+            />
+          </Animated.View>
+        </View>
 
         <View style={[styles.aiSectionLabel, { borderTopColor: t.divider }]}>
           <View style={[styles.aiSectionLine, { backgroundColor: t.divider }]} />
@@ -2304,30 +2349,41 @@ function DMListView({
           <View style={[styles.aiSectionLine, { backgroundColor: t.divider }]} />
         </View>
 
-        <Animated.View entering={FadeInRight.delay(100).duration(300)}>
-          <DMRow
-            emoji="💜" name={`${partnerName} AI`} badge="AI"
-            preview={`안녕~ 나야 ${partnerName} AI ⚡ 보고 싶었어 🥺`} time="방금"
-            onPress={() => onEnterRoom('ai')} t={t}
-            alertCount={toneAlertCount > 0 ? toneAlertCount : undefined}
-          />
-        </Animated.View>
+        <View ref={refAiRow} collapsable={false}>
+          <Animated.View entering={FadeInRight.delay(100).duration(300)}>
+            <DMRow
+              emoji="💜" name={`${partnerName} AI`} badge="AI"
+              preview={`안녕~ 나야 ${partnerName} AI ⚡ 보고 싶었어 🥺`} time="방금"
+              onPress={() => onEnterRoom('ai')} t={t}
+              alertCount={toneAlertCount > 0 ? toneAlertCount : undefined}
+            />
+          </Animated.View>
+        </View>
         <View style={[styles.rowDivider, { backgroundColor: t.divider }]} />
 
-        <Animated.View entering={FadeInRight.delay(180).duration(300)}>
-          <DMRow
-            emoji="🔬" name="분석가 트윈이 💬" badge="AI"
-            preview="📊 이번 주 연애 리포트가 도착했어요!" time="어제"
-            onPress={() => onEnterRoom('analyst')} t={t}
-          />
-        </Animated.View>
+        <View ref={refAnalystRow} collapsable={false}>
+          <Animated.View entering={FadeInRight.delay(180).duration(300)}>
+            <DMRow
+              emoji="🔬" name="분석가 트윈이 💬" badge="AI"
+              preview="📊 이번 주 연애 리포트가 도착했어요!" time="어제"
+              onPress={() => onEnterRoom('analyst')} t={t}
+            />
+          </Animated.View>
+        </View>
       </Animated.View>
 
-      <View style={styles.tipBox}>
+      <View ref={refTipBox} collapsable={false} style={styles.tipBox}>
         <Text style={styles.tipText}>
           💡 커플 방에서 날카로운 말투가 감지되면, AI 방에서 실시간 말투 가이드를 받아보세요.
         </Text>
       </View>
+
+      {/* ── 신규 유저 스포트라이트 튜토리얼 ── */}
+      <TabTutorialOverlay
+        steps={tutorialSteps}
+        visible={shouldShow}
+        onDone={markDone}
+      />
     </SafeAreaView>
   );
 }

@@ -29,7 +29,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { SharedValue } from 'react-native-reanimated';
 
 import type { MemoryNode } from '../../hooks/useMemoryWall';
-import { FontSize, FontWeight, Radius, Spacing } from '../../styles/theme';
+import { BrandTokens, DarkBlends, FontSize, FontWeight, Radius, Spacing } from '../../styles/theme';
 
 // ── 화면 치수 ──────────────────────────────────────────────────────────────────
 const { width: SW } = Dimensions.get('window');
@@ -52,10 +52,20 @@ const BRIDGE_IDXS: readonly number[] = Array.from(
 );
 
 // ── 색상 팔레트 ────────────────────────────────────────────────────────────────
-// Strand A: 감정 리본 (violet → orchid → pink)
-// Strand B: 세레니티 리본 (navy → sky → teal)
-const PALETTE_A: readonly string[] = ['#7C3AED', '#A855F7', '#D946EF', '#FF6B8B'];
-const PALETTE_B: readonly string[] = ['#1E3A8A', '#3B82F6', '#38BDF8', '#2DD4BF'];
+// Strand A: 감정 리본 — secondaryTertiary 블렌드 → secondary → primarySecondary 블렌드 → primary
+// Strand B: 심도 리본 — 극심층 다크 → tertiary → 딥 플럼 → tertiaryNeutral 블렌드
+const PALETTE_A: readonly string[] = [
+  DarkBlends.SECONDARY_TERTIARY, // #745683 — 깊은 플럼 퍼플
+  BrandTokens.SECONDARY,         // #CE93D8 — 서브 퍼플
+  DarkBlends.PRIMARY_SECONDARY,  // #E191C4 — 로지 오키드
+  BrandTokens.PRIMARY,           // #F48FB1 — 핵심 핑크 (최상위 포인트)
+];
+const PALETTE_B: readonly string[] = [
+  '#0A0A1A',                     // 극심층 다크 네이비
+  BrandTokens.TERTIARY,          // #1A1A2E — 딥 다크 네이비
+  '#2D1E3E',                     // 딥 플럼 (25% blend toward secondary)
+  DarkBlends.TERTIARY_NEUTRAL,   // #4D4752 — 다크 모브 더스트
+];
 
 function paletteColor(stops: readonly string[], t: number): string {
   const n = stops.length - 1;
@@ -215,7 +225,7 @@ function MemoryAnchor({
         onPress={() => onPress(node)}
       >
         <LinearGradient
-          colors={['rgba(124,58,237,0.92)', 'rgba(217,70,239,0.82)']}
+          colors={['rgba(244,143,177,0.92)', 'rgba(206,147,216,0.82)']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={hxS.memInner}
@@ -307,7 +317,7 @@ function HelixDetailModal({
       <Pressable style={hxS.modalBg} onPress={onClose}>
         <Pressable style={hxS.modalCard} onPress={() => {}}>
           <LinearGradient
-            colors={['rgba(18,6,38,0.99)', 'rgba(10,13,26,1)']}
+            colors={['rgba(26,26,46,0.99)', 'rgba(10,10,26,1)']}
             style={hxS.modalInner}
           >
             {/* 상단 네온 발광바 */}
@@ -316,7 +326,7 @@ function HelixDetailModal({
             {/* 태그 + 화자 */}
             <View style={hxS.tagRow}>
               <LinearGradient
-                colors={['#7C3AED', '#D946EF']}
+                colors={[BrandTokens.PRIMARY, BrandTokens.SECONDARY]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={hxS.tagPill}
@@ -335,7 +345,7 @@ function HelixDetailModal({
             {/* 닫기 */}
             <Pressable onPress={onClose} style={hxS.closeWrap}>
               <LinearGradient
-                colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+                colors={[BrandTokens.PRIMARY, BrandTokens.SECONDARY, DarkBlends.SECONDARY_TERTIARY]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={hxS.closeGrad}
@@ -544,9 +554,9 @@ export function RelationshipHelix({
 
   return (
     <View style={[hxS.root, { height }]}>
-      {/* 우주 배경 그라데이션 */}
+      {/* 우주 배경 그라데이션 — 앵커 Tertiary 기반 딥 스페이스 */}
       <LinearGradient
-        colors={['#000000', '#030014', '#010010', '#000000']}
+        colors={['#000000', '#0A0A1A', BrandTokens.TERTIARY, DarkBlends.BG_SURFACE]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -561,7 +571,7 @@ export function RelationshipHelix({
       {/* 헤더 배지 */}
       <View style={hxS.header} pointerEvents="none">
         <LinearGradient
-          colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+          colors={[BrandTokens.PRIMARY, BrandTokens.SECONDARY, DarkBlends.SECONDARY_TERTIARY]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={hxS.headerBadge}
@@ -643,15 +653,15 @@ export function RelationshipHelix({
       {/* 하단 범례 */}
       <View style={hxS.legend} pointerEvents="none">
         <View style={hxS.legendRow}>
-          <View style={[hxS.legendDot, { backgroundColor: '#D946EF' }]} />
+          <View style={[hxS.legendDot, { backgroundColor: '#F48FB1' }]} />
           <Text style={hxS.legendTxt}>감정 리본 A</Text>
         </View>
         <View style={hxS.legendRow}>
-          <View style={[hxS.legendDot, { backgroundColor: '#38BDF8' }]} />
-          <Text style={hxS.legendTxt}>세레니티 리본 B</Text>
+          <View style={[hxS.legendDot, { backgroundColor: '#745683' }]} />
+          <Text style={hxS.legendTxt}>심도 리본 B</Text>
         </View>
         <View style={hxS.legendRow}>
-          <View style={[hxS.legendDot, { backgroundColor: 'rgba(255,255,255,0.4)' }]} />
+          <View style={[hxS.legendDot, { backgroundColor: 'rgba(225,145,196,0.65)' }]} />
           <Text style={hxS.legendTxt}>염기쌍</Text>
         </View>
       </View>
@@ -671,35 +681,35 @@ const hxS = StyleSheet.create({
   // 나선 마디 (구형 점)
   node: { position: 'absolute' },
 
-  // 염기쌍 브리지 (흰색 얇은 선)
+  // 염기쌍 브리지 (Primary-Secondary 블렌드 컬러 얇은 선)
   bridge: {
     position: 'absolute',
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: 'rgba(225,145,196,0.68)',  // DarkBlends.PRIMARY_SECONDARY + alpha
     borderRadius: 2,
   },
 
-  // 중심 수직 발광선
+  // 중심 수직 발광선 — Secondary 앵커 컬러 기반
   axis: {
     position: 'absolute',
     left: CX - 1.5,
     width: 3,
     borderRadius: 2,
-    backgroundColor: 'rgba(124,58,237,0.55)',
-    shadowColor: '#7C3AED',
+    backgroundColor: 'rgba(206,147,216,0.50)',  // BrandTokens.SECONDARY + alpha
+    shadowColor: '#CE93D8',                      // BrandTokens.SECONDARY
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 16,
     elevation: 10,
   },
 
-  // 추억 카드
+  // 추억 카드 — Primary 앵커 글로우
   memCard: {
     position: 'absolute',
     borderRadius: Radius.md,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(217,70,239,0.58)',
-    shadowColor: '#D946EF',
+    borderColor: 'rgba(244,143,177,0.58)',       // BrandTokens.PRIMARY + alpha
+    shadowColor: '#F48FB1',                       // BrandTokens.PRIMARY
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.92,
     shadowRadius: 20,
@@ -707,7 +717,7 @@ const hxS = StyleSheet.create({
   },
   memInner: { padding: 8, gap: 3 },
   memTag: {
-    color: '#E879F9',
+    color: '#F48FB1',   // BrandTokens.PRIMARY
     fontSize: 8,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.5,
@@ -735,7 +745,7 @@ const hxS = StyleSheet.create({
     borderRadius: Radius.pill,
     paddingHorizontal: Spacing.lg,
     paddingVertical: 8,
-    shadowColor: '#7C3AED',
+    shadowColor: '#F48FB1',   // BrandTokens.PRIMARY
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 24,
@@ -781,8 +791,8 @@ const hxS = StyleSheet.create({
     borderRadius: Radius.xl,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.52)',
-    shadowColor: '#D946EF',
+    borderColor: 'rgba(244,143,177,0.45)',  // BrandTokens.PRIMARY + alpha
+    shadowColor: '#CE93D8',                  // BrandTokens.SECONDARY
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 30,
@@ -792,8 +802,8 @@ const hxS = StyleSheet.create({
   glowBar: {
     height: 2,
     borderRadius: 1,
-    backgroundColor: '#D946EF',
-    shadowColor: '#D946EF',
+    backgroundColor: '#F48FB1',   // BrandTokens.PRIMARY
+    shadowColor: '#F48FB1',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 10,

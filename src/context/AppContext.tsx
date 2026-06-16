@@ -20,6 +20,15 @@ import {
   DEFAULT_SUBSCRIPTION_STATUS,
 } from '../services/iapService';
 import type { KakaoSyncRecord } from '../services/kakaoUploadService';
+import type { HighlightCard } from '../services/kakaoHighlightService';
+import { loadHighlightCards } from '../services/kakaoHighlightService';
+import {
+  type MicroEventCode,
+  type OverflowStatus,
+  computeDailyDelta,
+  applyScoreDelta,
+  computeMasterBase,
+} from '../utils/scoreCalculator';
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
@@ -28,6 +37,8 @@ export type { SubscriptionStatus };
 
 export type { ChatStyleProfile };
 export type { KakaoSyncRecord };
+export type { HighlightCard };
+export type { MicroEventCode, OverflowStatus };
 
 // ── Privacy Level ─────────────────────────────────────────────────────────────
 // 3 = 완전복제(Full Clone, default) · 2 = 최적화(Optimized) · 1 = 보호(Protected)
@@ -191,6 +202,33 @@ interface AppContextValue {
   addMemorySentences: (records: KakaoSyncRecord[]) => void;
   lastKakaoSyncTimestamp: string | null;
   setLastKakaoSyncTimestamp: (ts: string | null) => void;
+  // 4-emotion AI highlight cards archive (Step #53)
+  highlightCards: HighlightCard[];
+  setHighlightCards: (cards: HighlightCard[]) => void;
+  addHighlightCards: (cards: HighlightCard[]) => void;
+  // ── DNA 일치율 엔진 (Step DNA-Core) ─────────────────────────────────────────
+  // S_Base: 성격 상성 기반 정규분포 초기 점수
+  baseScore: number;
+  setBaseScore: (score: number) => void;
+  // Bonus_Interview: 10분 음성 인터뷰 가산점 (0.0 ~ 5.0)
+  interviewBonus: number;
+  setInterviewBonus: (bonus: number) => void;
+  // S_Current: 실시간 가·감산 반영 최종 현재 일치율
+  currentScore: number;
+  setCurrentScore: (score: number) => void;
+  // 클램프 필터 오버플로우 상태
+  overflowStatus: OverflowStatus;
+  setOverflowStatus: (status: OverflowStatus) => void;
+  // 24개 마이크로 이벤트 일괄 적용 (clamp + overflow 자동 처리)
+  applyDailyEvents: (events: MicroEventCode[]) => void;
+  // Cross-tab: 홈 탭 CRITICAL_LOSS 배너 → 채팅 탭 FUN-CHA-003 강제 트리거
+  triggerMirrorMode: boolean;
+  setTriggerMirrorMode: (v: boolean) => void;
+  // FUN-HIS-005: AI 뮤즈에서 선택한 전역 OOTD/무드 — 무드 피드 필터링에 구독됨
+  currentOOTD: string | null;
+  setCurrentOOTD: (v: string | null) => void;
+  currentMood: string | null;
+  setCurrentMood: (v: string | null) => void;
   // Resets all session state to initial defaults (Step #43 — logout pipeline)
   resetSession: () => void;
 }
@@ -299,6 +337,24 @@ const AppContext = createContext<AppContextValue>({
   addMemorySentences: () => {},
   lastKakaoSyncTimestamp: null,
   setLastKakaoSyncTimestamp: () => {},
+  highlightCards: [],
+  setHighlightCards: () => {},
+  addHighlightCards: () => {},
+  baseScore: 70.0,
+  setBaseScore: () => {},
+  interviewBonus: 0.0,
+  setInterviewBonus: () => {},
+  currentScore: 70.0,
+  setCurrentScore: () => {},
+  overflowStatus: 'NONE',
+  setOverflowStatus: () => {},
+  applyDailyEvents: () => {},
+  triggerMirrorMode: false,
+  setTriggerMirrorMode: () => {},
+  currentOOTD: null,
+  setCurrentOOTD: () => {},
+  currentMood: null,
+  setCurrentMood: () => {},
   resetSession: () => {},
 });
 
@@ -329,18 +385,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>(DEFAULT_SUBSCRIPTION_STATUS);
   const [memorySentences, setMemorySentences] = useState<KakaoSyncRecord[]>([]);
   const [lastKakaoSyncTimestamp, setLastKakaoSyncTimestamp] = useState<string | null>(null);
+  const [highlightCards, setHighlightCards] = useState<HighlightCard[]>([]);
+  // ── DNA 일치율 엔진 상태 ─────────────────────────────────────────────────────
+  const [baseScore, setBaseScore] = useState<number>(70.0);
+  const [interviewBonus, setInterviewBonus] = useState<number>(0.0);
+  const [currentScore, setCurrentScore] = useState<number>(70.0);
+  const [overflowStatus, setOverflowStatus] = useState<OverflowStatus>('NONE');
+  const [triggerMirrorMode, setTriggerMirrorMode] = useState<boolean>(false);
+  // FUN-HIS-005: AI 뮤즈 선택값 — 무드 피드 필터 구독용
+  const [currentOOTD, setCurrentOOTD] = useState<string | null>(null);
+  const [currentMood, setCurrentMood] = useState<string | null>(null);
+
   const setCoupleInfo = (info: Partial<CoupleInfo>) =>
     setCoupleInfoState((prev) => ({ ...prev, ...info }));
   const addUploadedMedia = (delta = 1) =>
     setUploadedMediaCount((prev) => prev + delta);
   const setRoomEarlyMode = (roomId: string, value: boolean) =>
     setRoomEarlyModeState((prev) => ({ ...prev, [roomId]: value }));
+  const addHighlightCards = (cards: HighlightCard[]) =>
+    setHighlightCards((prev) => {
+      const existingIds = new Set(prev.map((c) => c.id));
+      const newOnly = cards.filter((c) => !existingIds.has(c.id));
+      return [...newOnly, ...prev];
+    });
+
   const addMemorySentences = (records: KakaoSyncRecord[]) =>
     setMemorySentences((prev) => {
       const existingIds = new Set(prev.map((r) => r.id));
       const newOnly = records.filter((r) => !existingIds.has(r.id));
       return [...newOnly, ...prev];
     });
+
+  // 24개 마이크로 이벤트 일괄 적용: clamp delta + overflow 감지 + currentScore 갱신
+  const applyDailyEvents = (events: MicroEventCode[]) => {
+    const { clamped, overflowStatus: newStatus } = computeDailyDelta(events);
+    setOverflowStatus(newStatus);
+    setCurrentScore((prev) => applyScoreDelta(prev, clamped));
+  };
+
+  // 인터뷰 완료 시 +5.0% 가산점 즉시 currentScore에 누적
+  useEffect(() => {
+    if (hasCompletedInterview && interviewBonus === 0) {
+      const bonus = 5.0;
+      setInterviewBonus(bonus);
+      setCurrentScore((prev) => {
+        const updated = computeMasterBase(baseScore, bonus);
+        // 이미 누적 delta가 있을 수 있으므로 prev와 updated 중 더 높은 값을 사용
+        return Math.max(prev, updated);
+      });
+    }
+  }, [hasCompletedInterview]);
 
   // Resets every state slice back to its initial default (Step #43 — logout pipeline).
   // Deliberately preserves themeMode so the display preference survives re-login.
@@ -368,9 +462,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
     setMemorySentences([]);
     setLastKakaoSyncTimestamp(null);
+    setHighlightCards([]);
+    setBaseScore(70.0);
+    setInterviewBonus(0.0);
+    setCurrentScore(70.0);
+    setOverflowStatus('NONE');
+    setTriggerMirrorMode(false);
+    setCurrentOOTD(null);
+    setCurrentMood(null);
   };
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
+
+  // Hydrate persisted highlight cards from AsyncStorage on app launch (Step #53)
+  useEffect(() => {
+    loadHighlightCards().then((cards) => {
+      if (cards.length > 0) setHighlightCards(cards);
+    });
+  }, []);
 
   // Seed the partner-review service store whenever dateCourses changes.
   // Courses that already carry a kakaoPlaceId and a real partnerRating
@@ -445,6 +554,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addMemorySentences,
         lastKakaoSyncTimestamp,
         setLastKakaoSyncTimestamp,
+        highlightCards,
+        setHighlightCards,
+        addHighlightCards,
+        baseScore,
+        setBaseScore,
+        interviewBonus,
+        setInterviewBonus,
+        currentScore,
+        setCurrentScore,
+        overflowStatus,
+        setOverflowStatus,
+        applyDailyEvents,
+        triggerMirrorMode,
+        setTriggerMirrorMode,
+        currentOOTD,
+        setCurrentOOTD,
+        currentMood,
+        setCurrentMood,
         resetSession,
       }}
     >

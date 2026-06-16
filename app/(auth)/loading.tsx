@@ -13,6 +13,11 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext } from '../../src/context/AppContext';
 import { analyzeChatRhythm, parseKakaoExport } from '../../src/lib/kakaoParser';
+import {
+  generateBaseScore,
+  getMBTICompatibilityGrade,
+  computeMasterBase,
+} from '../../src/utils/scoreCalculator';
 import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../src/styles/theme';
 
 // ─── Demo corpus — richly seeded to produce meaningful topDrips ───────────────
@@ -263,7 +268,17 @@ const PERSONA_STEPS = 32;
 
 export default function LoadingScreen() {
   const router = useRouter();
-  const { myProfile, setTrainingResult, setChatStyleProfile, rawKakaoText, setRawKakaoText } = useAppContext();
+  const {
+    myProfile,
+    partnerProfile,
+    hasCompletedInterview,
+    setTrainingResult,
+    setChatStyleProfile,
+    rawKakaoText,
+    setRawKakaoText,
+    setBaseScore,
+    setCurrentScore,
+  } = useAppContext();
 
   const [pct, setPct] = useState(0);
   const [toneStatus, setToneStatus] = useState<Status>('running');
@@ -349,6 +364,17 @@ export default function LoadingScreen() {
               myLineCount: parsed.myLines.length,
               maskedCount: parsed.maskedCount,
             });
+
+            // ── DNA 일치율 초기 점수 연산 (SRS §1-2) ─────────────────────────
+            const mbtiGrade = getMBTICompatibilityGrade(
+              myProfile.mbti,
+              partnerProfile.mbti,
+            );
+            const sBase = generateBaseScore(mbtiGrade, 'AVERAGE');
+            const interviewBns = hasCompletedInterview ? 5.0 : 0.0;
+            const sMasterBase = computeMasterBase(sBase, interviewBns);
+            setBaseScore(sBase);
+            setCurrentScore(sMasterBase);
 
             // Clear raw file text from context — no longer needed after parsing
             setRawKakaoText(null);

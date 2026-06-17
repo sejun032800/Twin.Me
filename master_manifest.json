@@ -1,0 +1,122 @@
+[
+  {
+    "file": "/workspaces/twin.me-react-native/cut_01.png",
+    "caption": "[클릭 전] 채팅 목록 — 분석가 트윈이 배너 노출",
+    "scenario": "S1 주간 리포트 & 페이월"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_02.png",
+    "caption": "[클릭 후] 트윈이 챗룸 — 주간 리포트 카드 버블 활성",
+    "scenario": "S1 주간 리포트 & 페이월"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_03.png",
+    "caption": "[클릭 후] WeeklyReportModal 오픈 — HardLock 블러 잠금 상태",
+    "scenario": "S1 주간 리포트 & 페이월"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_04.png",
+    "caption": "[클릭 후] PaywallNudge 팝업 — 프리미엄 업그레이드 넛지",
+    "scenario": "S1 주간 리포트 & 페이월"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_05.png",
+    "caption": "[결제 시뮬레이션] 구독 버튼 클릭 후 페이월 최종 상태",
+    "scenario": "S1 주간 리포트 & 페이월"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_06.png",
+    "caption": "[클릭 전] 추억 월 탭 — 기본 진입 상태",
+    "scenario": "S2 무드 피드 & 지도 담기"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_07.png",
+    "caption": "[클릭 후] 🧭 무드 피드 세그먼트 전환 — 피드 리스트 렌더",
+    "scenario": "S2 무드 피드 & 지도 담기"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_08.png",
+    "caption": "[클릭 후] OOTD & 무드 필터 토글 활성 — 조건부 피드 필터링",
+    "scenario": "S2 무드 피드 & 지도 담기"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_09.png",
+    "caption": "[클릭 후] 🧭 지도에 담기 CTA — 핑크 하트 펄스 애니메이션 포착",
+    "scenario": "S2 무드 피드 & 지도 담기"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_10.png",
+    "caption": "[클릭 후] 🗺️ 지도 세그먼트 전환 — Bulk Insert 핀 & 경로선",
+    "scenario": "S2 무드 피드 & 지도 담기"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_11.png",
+    "caption": "[클릭 전] 지도 뷰 — ≡ 햄버거 버튼 비활성 상태",
+    "scenario": "S3 레이어 컨트롤 패널"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_12.png",
+    "caption": "[클릭 후] 레이어 관리 드로어 패널 슬라이드 인",
+    "scenario": "S3 레이어 컨트롤 패널"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_13.png",
+    "caption": "[클릭 후] + 새 계획 레이어 추가 — 인라인 편집 입력 필드",
+    "scenario": "S3 레이어 컨트롤 패널"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_14.png",
+    "caption": "[클릭 후] 레이어 가시성 토글 — 핀 숨김/표시 연동",
+    "scenario": "S3 레이어 컨트롤 패널"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_15.png",
+    "caption": "[클릭 전] 설정 메인 — 계정·보안·테마 섹션 전체 뷰",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_16.png",
+    "caption": "[클릭 전] 소셜 계정 연동 페이지 — 4개 프로바이더 버튼",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_17.png",
+    "caption": "[클릭 후] Google 연동 — 로딩 스피너 / 연동 요청 중",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_18.png",
+    "caption": "[연동 완료] Google ✓ 연동됨 배지 활성화",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_19.png",
+    "caption": "[연동 완료] Kakao ✓ 연동됨 배지 활성화",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_20.png",
+    "caption": "[연동 완료] 4개 소셜 계정 전체 연동됨 배지 상태",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_21.png",
+    "caption": "[클릭 전] 설정 최하단 — 로그아웃 · 계정 삭제 레드 버튼",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_22.png",
+    "caption": "[클릭 후] 계정 삭제 1단계 — 정말로 삭제하시겠어요? 경고 팝업",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_23.png",
+    "caption": "[클릭 후] 계정 삭제 2단계 — 파기 요약 및 최종 동의 확인",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  },
+  {
+    "file": "/workspaces/twin.me-react-native/cut_24.png",
+    "caption": "[최종] 데이터 Purge 완료 — 온보딩 스플래시로 리다이렉트",
+    "scenario": "S4 소셜 연동 & 계정 탈퇴"
+  }
+]

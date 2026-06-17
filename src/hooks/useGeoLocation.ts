@@ -3,7 +3,13 @@
 // Exposes a stable coords pair that is always valid — real GPS when available, Seoul fallback otherwise.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import * as Location from 'expo-location';
+import { Platform } from 'react-native';
+
+// expo-location is native-only; on web we use navigator.geolocation
+let Location: typeof import('expo-location') | null = null;
+if (Platform.OS !== 'web') {
+  Location = require('expo-location') as typeof import('expo-location');
+}
 
 /** Seoul city centre — default when GPS is unavailable or permission denied */
 export const GEO_FALLBACK = { lat: 37.5512, lng: 126.9882 } as const;
@@ -32,91 +38,123 @@ export function useGeoLocation(): GeoState {
   const [coords, setCoords]         = useState<{ lat: number; lng: number }>(GEO_FALLBACK);
   const [isReal, setIsReal]         = useState(false);
 
-  const watchRef   = useRef<Location.LocationSubscription | null>(null);
+  const watchRef   = useRef<{ remove: () => void } | null>(null);
   const mountedRef = useRef(true);
-  // Mirror of coords state — readable synchronously inside callbacks without closure staleness
   const coordsRef  = useRef<{ lat: number; lng: number }>(GEO_FALLBACK);
 
-  // ── Internal: apply a fresh Location object ───────────────────────────────────
-  const applyLoc = useCallback((loc: Location.LocationObject) => {
+  const applyCoords = useCallback((lat: number, lng: number) => {
     if (!mountedRef.current) return;
-    const next = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+    const next = { lat, lng };
     coordsRef.current = next;
     setCoords(next);
     setIsReal(true);
   }, []);
 
-  // ── Internal: start watchPositionAsync subscription ───────────────────────────
-  const startTracking = useCallback(async () => {
-    if (watchRef.current) return; // already watching — idempotent
-    try {
-      // Immediate one-shot fix first so the pin appears without waiting for the watcher
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      applyLoc(current);
-
-      // Subscribe to ongoing position updates (every 10s or 15m moved)
-      watchRef.current = await Location.watchPositionAsync(
-        {
-          accuracy:         Location.Accuracy.Balanced,
-          timeInterval:     10_000,
-          distanceInterval: 15,
-        },
-        applyLoc,
-      );
-    } catch {
-      // GPS unavailable (tunnel / indoor / emulator) — coords stay at fallback silently
+  // ── Web: browser Geolocation API ──────────────────────────────────────────────
+  const requestPermissionWeb = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      if (mountedRef.current) setPermission('denied');
+      return;
     }
-  }, [applyLoc]);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (mountedRef.current) setPermission('granted');
+        applyCoords(pos.coords.latitude, pos.coords.longitude);
+        // Watch ongoing updates
+        const id = navigator.geolocation.watchPosition(
+          (p) => applyCoords(p.coords.latitude, p.coords.longitude),
+          () => {},
+          { enableHighAccuracy: false },
+        );
+        watchRef.current = { remove: () => navigator.geolocation.clearWatch(id) };
+      },
+      () => {
+        if (mountedRef.current) setPermission('denied');
+      },
+      { enableHighAccuracy: false, timeout: 8000 },
+    );
+  }, [applyCoords]);
 
-  // ── Public: request foreground permission from the OS ─────────────────────────
-  const requestPermission = useCallback(async () => {
+  // ── Native: expo-location ─────────────────────────────────────────────────────
+  const startTrackingNative = useCallback(async () => {
+    if (!Location || watchRef.current) return;
+    try {
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      applyCoords(current.coords.latitude, current.coords.longitude);
+      const sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 15 },
+        (loc) => applyCoords(loc.coords.latitude, loc.coords.longitude),
+      );
+      watchRef.current = sub;
+    } catch {
+      // GPS unavailable — stay at fallback
+    }
+  }, [applyCoords]);
+
+  const requestPermissionNative = useCallback(async () => {
+    if (!Location) return;
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === Location.PermissionStatus.GRANTED) {
         if (mountedRef.current) setPermission('granted');
-        await startTracking();
+        await startTrackingNative();
       } else {
         if (mountedRef.current) setPermission('denied');
       }
     } catch {
       if (mountedRef.current) setPermission('denied');
     }
-  }, [startTracking]);
+  }, [startTrackingNative]);
 
-  // ── Public: re-acquire current position and return the fresh coords ───────────
+  const requestPermission = Platform.OS === 'web' ? requestPermissionWeb : requestPermissionNative;
+
   const recenter = useCallback(async (): Promise<{ lat: number; lng: number }> => {
-    try {
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+    if (Platform.OS === 'web') {
+      return new Promise((resolve) => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+          resolve(coordsRef.current);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            applyCoords(pos.coords.latitude, pos.coords.longitude);
+            resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          },
+          () => resolve(coordsRef.current),
+        );
       });
-      applyLoc(loc);
+    }
+    if (!Location) return coordsRef.current;
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      applyCoords(loc.coords.latitude, loc.coords.longitude);
       return { lat: loc.coords.latitude, lng: loc.coords.longitude };
     } catch {
-      return coordsRef.current; // return last-known position on error
+      return coordsRef.current;
     }
-  }, [applyLoc]);
+  }, [applyCoords]);
 
-  // ── Mount: check existing permission, auto-request if not yet determined ──────
   useEffect(() => {
     mountedRef.current = true;
 
-    (async () => {
-      try {
-        const { status } = await Location.getForegroundPermissionsAsync();
-        if (status === Location.PermissionStatus.GRANTED) {
-          // Permission already granted from a previous session — start tracking silently
-          if (mountedRef.current) setPermission('granted');
-          await startTracking();
-        } else {
-          // First-time activation or previously denied — auto-request per spec
-          await requestPermission();
+    if (Platform.OS === 'web') {
+      requestPermissionWeb();
+    } else {
+      (async () => {
+        if (!Location) { setPermission('denied'); return; }
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === Location.PermissionStatus.GRANTED) {
+            if (mountedRef.current) setPermission('granted');
+            await startTrackingNative();
+          } else {
+            await requestPermissionNative();
+          }
+        } catch {
+          if (mountedRef.current) setPermission('denied');
         }
-      } catch {
-        if (mountedRef.current) setPermission('denied');
-      }
-    })();
+      })();
+    }
 
     return () => {
       mountedRef.current = false;
@@ -124,7 +162,7 @@ export function useGeoLocation(): GeoState {
       watchRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — runs only on mount/unmount
+  }, []);
 
   return { permission, coords, isReal, requestPermission, recenter };
 }

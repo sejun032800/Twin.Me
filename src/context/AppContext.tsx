@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { DARK_THEME, LIGHT_THEME, ThemeMode, ThemeTokens } from '../styles/theme';
 import type { Photo, MemoryRing } from '../types/gallery';
+import type { UserAccount, LinkedProvider } from '../types/auth';
+import { DEFAULT_USER_ACCOUNT } from '../types/auth';
+import { handleAccountLink } from '../utils/authSync';
 import { generateTopMemoryRings } from '../utils/photoAnalyzer';
 import {
   ChatStyleProfile,
@@ -42,6 +45,7 @@ export type { KakaoSyncRecord };
 export type { HighlightCard };
 export type { MicroEventCode, OverflowStatus };
 export type { Photo, MemoryRing };
+export type { UserAccount, LinkedProvider };
 
 // ── Map Layer System (FUN-HIS-006) ────────────────────────────────────────────
 export type LayerType = 'HISTORY' | 'PLAN' | 'SECRET';
@@ -248,8 +252,13 @@ interface AppContextValue {
   galleryPhotos: Photo[];
   memoryRings: MemoryRing[];
   addGalleryPhotos: (photos: Photo[]) => void;
+  // Social account linking + data migration pipeline (Step #56)
+  userAccount: UserAccount;
+  linkSocialAccount: (provider: LinkedProvider) => Promise<void>;
   // Resets all session state to initial defaults (Step #43 — logout pipeline)
   resetSession: () => void;
+  // Purges ALL user data to empty defaults — used by account deletion pipeline
+  purgeAccount: () => void;
   // ── Map Layer System (FUN-HIS-006) ─────────────────────────────────────────
   planLayers: MapLayer[];
   layerVisibility: Record<string, boolean>; // key → false means hidden; undefined/true = visible
@@ -408,6 +417,7 @@ const AppContext = createContext<AppContextValue>({
   currentMood: null,
   setCurrentMood: () => {},
   resetSession: () => {},
+  purgeAccount: () => {},
   planLayers: [],
   layerVisibility: {},
   secretCourses: [],
@@ -422,6 +432,8 @@ const AppContext = createContext<AppContextValue>({
   galleryPhotos: [],
   memoryRings: [],
   addGalleryPhotos: () => {},
+  userAccount: DEFAULT_USER_ACCOUNT,
+  linkSocialAccount: async () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -466,6 +478,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [memoryRings, setMemoryRings] = useState<MemoryRing[]>(() =>
     generateTopMemoryRings(MOCK_GALLERY_PHOTOS),
   );
+  // Social account (Step #56)
+  const [userAccount, setUserAccount] = useState<UserAccount>(DEFAULT_USER_ACCOUNT);
 
   useEffect(() => {
     setMemoryRings(generateTopMemoryRings(galleryPhotos));
@@ -582,6 +596,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [hasCompletedInterview]);
 
+  // Social account link — bundles local data and ships to server (Step #56)
+  const linkSocialAccount = async (provider: LinkedProvider): Promise<void> => {
+    await handleAccountLink(provider, {
+      currentScore,
+      dateCourses,
+      weeklyReportData,
+      userAccount,
+      setUserAccount,
+    });
+  };
+
   // Resets every state slice back to its initial default (Step #43 — logout pipeline).
   // Deliberately preserves themeMode so the display preference survives re-login.
   const resetSession = () => {
@@ -620,6 +645,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLayerVisibility({});
     setSecretCourses([]);
     setGalleryPhotos(MOCK_GALLERY_PHOTOS);
+    setUserAccount(DEFAULT_USER_ACCOUNT);
+  };
+
+  // Permanently purges all user data to zero/empty state (account deletion pipeline).
+  // Differs from resetSession: dateCourses/scores/gallery are cleared to [] / 0, not seeded with mocks.
+  const purgeAccount = () => {
+    setAccuracyBannerVisible(true);
+    setMyProfile({ name: '', gender: '', mbti: '', enneagram: '' });
+    setPartnerProfile({ name: '', gender: '', mbti: '' });
+    setInviteCode('');
+    setCoupleId(null);
+    setTrainingResult(null);
+    setRawKakaoText(null);
+    setChatStyleProfile(DEFAULT_CHAT_STYLE_PROFILE);
+    setPrivacyLevel(3);
+    setDateCourses([]);
+    setTriggerAddCourse(false);
+    setHasCompletedInterview(false);
+    setWeeklyMetrics({ currentScore: 0, prevScore: 0, partnerScore: 0, weeklyMessageCount: 0, avgReplyTimeMin: 0 });
+    setPartnerAiMood([]);
+    setIsEarlyDatingMode(false);
+    setRoomEarlyModeState({});
+    setPartnerSensitiveConfig(DEFAULT_PARTNER_SENSITIVE_CONFIG);
+    setWeeklyReportData(null);
+    setCoupleInfoState({ startedAt: null });
+    setUploadedMediaCount(0);
+    setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+    setMemorySentences([]);
+    setLastKakaoSyncTimestamp(null);
+    setHighlightCards([]);
+    setBaseScore(0);
+    setInterviewBonus(0);
+    setCurrentScore(0);
+    setOverflowStatus('NONE');
+    setTriggerMirrorMode(false);
+    setCurrentOOTD(null);
+    setCurrentMood(null);
+    setPlanLayers([]);
+    setLayerVisibility({});
+    setSecretCourses([]);
+    setGalleryPhotos([]);
+    setUserAccount(DEFAULT_USER_ACCOUNT);
   };
 
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
@@ -723,6 +790,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentMood,
         setCurrentMood,
         resetSession,
+        purgeAccount,
         planLayers,
         layerVisibility,
         secretCourses,
@@ -737,6 +805,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         galleryPhotos,
         memoryRings,
         addGalleryPhotos,
+        userAccount,
+        linkSocialAccount,
       }}
     >
       {children}

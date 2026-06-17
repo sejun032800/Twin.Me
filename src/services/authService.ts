@@ -15,8 +15,21 @@
 //   When API_BASE is not configured (dev / preview) a 300 ms stub is executed
 //   so the loading overlay path stays exercised locally.
 
-import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// expo-secure-store is native-only; on web we fall back to AsyncStorage
+const SecureStore: {
+  setItemAsync: (key: string, value: string) => Promise<void>;
+  getItemAsync: (key: string) => Promise<string | null>;
+  deleteItemAsync: (key: string) => Promise<void>;
+} = Platform.OS === 'web'
+  ? {
+      setItemAsync: (key, value) => AsyncStorage.setItem(key, value),
+      getItemAsync: (key) => AsyncStorage.getItem(key),
+      deleteItemAsync: (key) => AsyncStorage.removeItem(key),
+    }
+  : require('expo-secure-store');
 
 const API_BASE: string = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').replace(/\/$/, '');
 const LOGOUT_TIMEOUT_MS = 5_000;

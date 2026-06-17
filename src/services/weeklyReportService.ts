@@ -13,7 +13,17 @@
 //   loadCachedReport()      → loads persisted report on cold start
 //   shouldFireWeeklyReport() → Sunday 22:00 gate
 
-import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// expo-file-system new API (SDK 56) is native-only
+let _File: (typeof import('expo-file-system'))['File'] | null = null;
+let _Paths: (typeof import('expo-file-system'))['Paths'] | null = null;
+if (Platform.OS !== 'web') {
+  const fs = require('expo-file-system') as typeof import('expo-file-system');
+  _File = fs.File;
+  _Paths = fs.Paths;
+}
 import type { UserProfile, PartnerProfile } from '../context/AppContext';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -467,7 +477,11 @@ export async function generateAnalystSummary(
 
 export async function loadCachedReport(): Promise<WeeklyReportData | null> {
   try {
-    const file = new File(Paths.document, REPORT_CACHE_FILE);
+    if (Platform.OS === 'web') {
+      const raw = await AsyncStorage.getItem(REPORT_CACHE_FILE);
+      return raw ? (JSON.parse(raw) as WeeklyReportData) : null;
+    }
+    const file = new _File!(_Paths!.document, REPORT_CACHE_FILE);
     if (!file.exists) return null;
     const raw = await file.text();
     return JSON.parse(raw) as WeeklyReportData;
@@ -478,7 +492,11 @@ export async function loadCachedReport(): Promise<WeeklyReportData | null> {
 
 export async function saveReportToCache(data: WeeklyReportData): Promise<void> {
   try {
-    const file = new File(Paths.document, REPORT_CACHE_FILE);
+    if (Platform.OS === 'web') {
+      await AsyncStorage.setItem(REPORT_CACHE_FILE, JSON.stringify(data));
+      return;
+    }
+    const file = new _File!(_Paths!.document, REPORT_CACHE_FILE);
     if (!file.exists) file.create();
     file.write(JSON.stringify(data));
   } catch {
@@ -488,7 +506,11 @@ export async function saveReportToCache(data: WeeklyReportData): Promise<void> {
 
 export async function loadLastGeneratedTimestamp(): Promise<number> {
   try {
-    const file = new File(Paths.document, LAST_GENERATED_FILE);
+    if (Platform.OS === 'web') {
+      const raw = await AsyncStorage.getItem(LAST_GENERATED_FILE);
+      return raw ? ((JSON.parse(raw) as { ts: number }).ts ?? 0) : 0;
+    }
+    const file = new _File!(_Paths!.document, LAST_GENERATED_FILE);
     if (!file.exists) return 0;
     const raw = file.textSync();
     return (JSON.parse(raw) as { ts: number }).ts ?? 0;
@@ -499,7 +521,11 @@ export async function loadLastGeneratedTimestamp(): Promise<number> {
 
 async function saveLastGeneratedTimestamp(ts: number): Promise<void> {
   try {
-    const file = new File(Paths.document, LAST_GENERATED_FILE);
+    if (Platform.OS === 'web') {
+      await AsyncStorage.setItem(LAST_GENERATED_FILE, JSON.stringify({ ts }));
+      return;
+    }
+    const file = new _File!(_Paths!.document, LAST_GENERATED_FILE);
     if (!file.exists) file.create();
     file.write(JSON.stringify({ ts }));
   } catch {

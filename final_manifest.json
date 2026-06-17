@@ -1,0 +1,128 @@
+[
+  {
+    "idx": 1,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_01.png",
+    "caption": "Step 1. 앱 최초 진입 — 스플래시 로딩 & 온보딩 게스트 시작 화면",
+    "section": "ONBOARD",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_01.png"
+  },
+  {
+    "idx": 2,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_02.png",
+    "caption": "Step 2. 채팅 목록 — 분석가 트윈이 주간 리포트 도착 배너 노출",
+    "section": "CHAT",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_02.png"
+  },
+  {
+    "idx": 3,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_03.png",
+    "caption": "Step 3. 분석가 트윈이 챗룸 — 주간 리포트 버블 & 환영 메시지",
+    "section": "CHAT",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_03.png"
+  },
+  {
+    "idx": 4,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_04.png",
+    "caption": "Step 4. 주간 연애 리포트 HardLock — 핵심 스탯 blur(8px) 자물쇠 잠금 (무료 버전)",
+    "section": "PAYWALL",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_04.png"
+  },
+  {
+    "idx": 5,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_05.png",
+    "caption": "Step 5. 결제 넛지 팝업 — 도메인 맞춤형 구독 업그레이드 유도 CTA",
+    "section": "PAYWALL",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_05.png"
+  },
+  {
+    "idx": 6,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_06.png",
+    "caption": "Step 6. 결제 승인 즉시 150ms 스프링 모션으로 블러 해제 & 인포그래픽 스탯 전면 활성화",
+    "section": "PAYWALL",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_06.png"
+  },
+  {
+    "idx": 7,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_07.png",
+    "caption": "Step 7. 추억 월 — 감정별 기억 아카이브 폴라로이드 기본 상태",
+    "section": "MEMORY",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_07.png"
+  },
+  {
+    "idx": 8,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_08.png",
+    "caption": "Step 8. [🧭 무드 피드] 세그먼트 전환 — 익명 커뮤니티 데이트 코스 카드 리스트",
+    "section": "MEMORY",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_08.png"
+  },
+  {
+    "idx": 9,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_09.png",
+    "caption": "Step 9. 무드 필터 토글 ON — OOTD & 무드 조건 동적 필터링 카드 리스트",
+    "section": "MEMORY",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_09.png"
+  },
+  {
+    "idx": 10,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_10.png",
+    "caption": "Step 10. [🗺️ 데이트 지도] — 멀티 레이어 핀 & AI 추천 경로선 렌더",
+    "section": "MAP",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_10.png"
+  },
+  {
+    "idx": 11,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_11.png",
+    "caption": "Step 11. ≡ 레이어 컨트롤 패널 드로어 오픈 — 계획·시크릿 레이어 토글",
+    "section": "MAP",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_11.png"
+  },
+  {
+    "idx": 12,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_12.png",
+    "caption": "Step 12. 설정 탭 메인 — 계정·보안·테마·알림 전체 섹션 뷰",
+    "section": "SETTING",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_12.png"
+  },
+  {
+    "idx": 13,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_13.png",
+    "caption": "Step 13. 소셜 계정 연동 — Google·Kakao·Naver·Apple 4개 버튼 초기 상태",
+    "section": "SETTING",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_13.png"
+  },
+  {
+    "idx": 14,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_14.png",
+    "caption": "Step 14. 소셜 계정 연동 완료 — 4개 프로바이더 [✓ 연동됨 • 동기화 완료] 배지 활성",
+    "section": "SETTING",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_14.png"
+  },
+  {
+    "idx": 15,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_15.png",
+    "caption": "Step 15. 설정 최하단 — 네온 레드 [계정 삭제] 버튼 노출 상태",
+    "section": "DELETE",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_15.png"
+  },
+  {
+    "idx": 16,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_16.png",
+    "caption": "Step 16. 계정 삭제 1단계 — \"정말로 삭제하시겠어요?\" 경고 알림 팝업",
+    "section": "DELETE",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_16.png"
+  },
+  {
+    "idx": 17,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_17.png",
+    "caption": "Step 17. 계정 삭제 2단계 — 데이터 파기 요약 & 최종 동의 모달",
+    "section": "DELETE",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_17.png"
+  },
+  {
+    "idx": 18,
+    "rawFile": "/workspaces/twin.me-react-native/final_raw_18.png",
+    "caption": "Step 18. 퍼지 완료 — AppContext 전체 초기화 & 온보딩 첫 화면 리다이렉트 (뒤로가기 차단)",
+    "section": "PURGE",
+    "captionedFile": "/workspaces/twin.me-react-native/final_captioned/final_captioned_18.png"
+  }
+]

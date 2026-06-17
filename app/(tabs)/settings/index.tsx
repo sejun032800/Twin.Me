@@ -1955,6 +1955,14 @@ function AccountCenterSection({ t }: { t: ThemeTokens }) {
       desc: '데이터 다운로드 · 검색 기록 · 앱 권한',
       route: '/settings/data-permissions',
     },
+    {
+      id: 'account-link',
+      emoji: '🔗',
+      bg: 'rgba(167,139,250,0.15)',
+      label: '소셜 계정 연동',
+      desc: 'Google · Kakao · Naver · Apple 연동 및 데이터 동기화',
+      route: '/settings/account-link',
+    },
   ];
 
   return (
@@ -2285,56 +2293,164 @@ const ksS = StyleSheet.create({
   },
 });
 
+// ─── Account Deletion Server Placeholder ─────────────────────────────────────
+
+async function requestAccountDeletionToServer(): Promise<void> {
+  // TODO: wire to DELETE /api/v1/users/me — returns 204 on success
+  console.log('[AccountPurge] Permanent account deletion request dispatched to server.');
+}
+
 // ─── Settings Footer ──────────────────────────────────────────────────────────
 
 function SettingsFooter({ t }: { t: ThemeTokens }) {
-  const { resetSession } = useAppContext();
+  const { resetSession, purgeAccount } = useAppContext();
   const router = useRouter();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const handleLogout = () => {
-    if (isLoggingOut) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      '로그아웃',
-      '정말 로그아웃하시겠어요?\n연인과의 실시간 연결이 잠시 일시정지됩니다 🔑',
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '로그아웃', style: 'destructive', onPress: executeLogout },
-      ],
-    );
-  };
+  const [isLoggingOut, setIsLoggingOut]   = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [deleteStep, setDeleteStep]       = useState<null | 'step1' | 'step2'>(null);
+  const [isDeleting, setIsDeleting]       = useState(false);
 
   const executeLogout = async () => {
+    setShowLogoutConfirm(false);
     setIsLoggingOut(true);
-    // 1. 서버 토큰 블랙리스트 + 로컬 스토리지 소각 — 어느 쪽이 실패해도 로컬 초기화는 반드시 진행
     await Promise.allSettled([logoutFromServer(), clearLocalAuthData()]);
-    // 2. 전역 AppContext 상태 슬레이트 클린
     resetSession();
-    // 3. 네비게이션 히스토리를 Splash로 완전 교체 — 물리 백버튼 · 스와이프 백 차단
+    router.replace('/(auth)/splash');
+  };
+
+  const handleAccountPurge = async () => {
+    setDeleteStep(null);
+    setIsDeleting(true);
+    try {
+      await requestAccountDeletionToServer();
+    } catch {
+      // Server failure is non-blocking — local purge proceeds regardless
+    }
+    purgeAccount();
     router.replace('/(auth)/splash');
   };
 
   return (
     <View style={ftS.container}>
       <Text style={[ftS.version, { color: t.textMuted }]}>Twin.me version 2.4.0</Text>
+
+      {/* ── 구분선 ───────────────────────────────────────────────────── */}
+      <View style={[ftS.hr, { backgroundColor: t.cardBorder }]} />
+
+      {/* ── 로그아웃 버튼 — slate gray ───────────────────────────────── */}
       <Pressable
         style={({ pressed }) => [
           ftS.logoutBtn,
           pressed && !isLoggingOut && { opacity: 0.7 },
-          isLoggingOut && ftS.logoutBtnPending,
+          isLoggingOut && { opacity: 0.5 },
         ]}
-        onPress={handleLogout}
-        disabled={isLoggingOut}
+        onPress={() => {
+          if (isLoggingOut || isDeleting) return;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          setShowLogoutConfirm(true);
+        }}
+        disabled={isLoggingOut || isDeleting}
       >
         {isLoggingOut ? (
-          <ActivityIndicator size="small" color={Colors.ALERT_SIREN_RED} />
+          <ActivityIndicator size="small" color="#94A3B8" />
         ) : (
           <Text style={ftS.logoutText}>로그아웃</Text>
         )}
       </Pressable>
 
-      {/* Full-screen dark overlay — throttles all touch input during logout transaction */}
+      {/* ── 계정 삭제 버튼 — neon natural red #FF4D4D ───────────────── */}
+      <Pressable
+        style={({ pressed }) => [
+          ftS.deleteBtn,
+          pressed && !isDeleting && { opacity: 0.7 },
+          isDeleting && { opacity: 0.5 },
+        ]}
+        onPress={() => {
+          if (isLoggingOut || isDeleting) return;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          setDeleteStep('step1');
+        }}
+        disabled={isLoggingOut || isDeleting}
+      >
+        <Text style={ftS.deleteText}>계정 삭제</Text>
+      </Pressable>
+
+      {/* ── 로그아웃 확인 커스텀 모달 ───────────────────────────────── */}
+      <Modal visible={showLogoutConfirm} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: t.card }]}>
+            <Text style={styles.modalEmoji}>🔑</Text>
+            <Text style={[styles.modalTitle, { color: t.text }]}>로그아웃</Text>
+            <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
+              정말 로그아웃하시겠어요?{'\n'}연인과의 실시간 연결이 잠시 일시정지됩니다.
+            </Text>
+            <Pressable style={ftS.logoutConfirmBtn} onPress={executeLogout}>
+              <Text style={ftS.logoutConfirmText}>로그아웃</Text>
+            </Pressable>
+            <Pressable style={styles.modalCancelBtn} onPress={() => setShowLogoutConfirm(false)}>
+              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 계정 삭제 1단계 모달 ─────────────────────────────────────── */}
+      <Modal visible={deleteStep === 'step1'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: t.card, borderColor: 'rgba(255,77,77,0.30)' }]}>
+            <Text style={styles.modalEmoji}>🚨</Text>
+            <Text style={[styles.modalTitle, { color: t.text }]}>정말로 삭제하시겠어요?</Text>
+            <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
+              그동안의 기록이 전부 지워집니다.
+            </Text>
+            <Pressable
+              style={ftS.step1ContinueBtn}
+              onPress={() => setDeleteStep('step2')}
+            >
+              <Text style={ftS.step1ContinueText}>이어하기 (삭제 절차 진행)</Text>
+            </Pressable>
+            <Pressable style={styles.modalCancelBtn} onPress={() => setDeleteStep(null)}>
+              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 계정 삭제 2단계 최종 확인 모달 ─────────────────────────── */}
+      <Modal visible={deleteStep === 'step2'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: t.card, borderColor: 'rgba(255,77,77,0.40)' }]}>
+            <Text style={styles.modalEmoji}>💀</Text>
+            <Text style={[styles.modalTitle, { color: '#FF4D4D' }]}>최종 확인</Text>
+            <View style={ftS.dataWarnBox}>
+              <Text style={[ftS.dataWarnText, { color: t.textSecondary }]}>
+                연애 DNA 일치율 로그, 커스텀 데이트 지도 핀, 주간 연애 리포트 등 앱 내 모든 아카이브 데이터가 즉시 파기되며 복구가 불가능합니다.
+              </Text>
+            </View>
+            <Pressable
+              style={ftS.finalDeleteBtn}
+              onPress={handleAccountPurge}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={ftS.finalDeleteText}>⚠️ 확인하였으며, 계정 삭제에 동의합니다</Text>
+              )}
+            </Pressable>
+            <Pressable
+              style={styles.modalCancelBtn}
+              onPress={() => setDeleteStep(null)}
+              disabled={isDeleting}
+            >
+              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 로그아웃 진행 오버레이 ───────────────────────────────────── */}
       <Modal visible={isLoggingOut} transparent animationType="fade" statusBarTranslucent>
         <View style={ftS.logoutOverlay}>
           <View style={ftS.logoutCard}>
@@ -2358,27 +2474,113 @@ const ftS = StyleSheet.create({
     fontSize: FontSize.xs,
     letterSpacing: 0.3,
   },
+  hr: {
+    width: '100%',
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 4,
+  },
+  // ── 로그아웃 버튼 — slate gray minimal ───────────────────────────────
   logoutBtn: {
     width: '100%',
-    paddingVertical: 16,
+    paddingVertical: 15,
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-    backgroundColor: 'rgba(239,68,68,0.06)',
+    borderColor: 'rgba(148,163,184,0.25)',
+    backgroundColor: 'rgba(148,163,184,0.07)',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 52,
   },
-  logoutBtnPending: {
-    opacity: 0.5,
-  },
   logoutText: {
-    color: Colors.ALERT_SIREN_RED,
+    color: '#94A3B8',
     fontSize: FontSize.base,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.3,
   },
-  // Logout in-progress overlay
+  // ── 계정 삭제 버튼 — neon natural red ───────────────────────────────
+  deleteBtn: {
+    width: '100%',
+    paddingVertical: 15,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,77,77,0.28)',
+    backgroundColor: 'rgba(255,77,77,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  deleteText: {
+    color: '#FF4D4D',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.3,
+  },
+  // ── 로그아웃 확인 모달 내 버튼 ──────────────────────────────────────
+  logoutConfirmBtn: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(148,163,184,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.35)',
+    alignItems: 'center',
+  },
+  logoutConfirmText: {
+    color: '#94A3B8',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+  },
+  // ── 1단계 이어하기 버튼 ─────────────────────────────────────────────
+  step1ContinueBtn: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(255,77,77,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,77,77,0.35)',
+    alignItems: 'center',
+  },
+  step1ContinueText: {
+    color: '#FF4D4D',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+  },
+  // ── 2단계 데이터 경고 박스 ──────────────────────────────────────────
+  dataWarnBox: {
+    backgroundColor: 'rgba(255,77,77,0.08)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,77,77,0.28)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    width: '100%',
+  },
+  dataWarnText: {
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  // ── 2단계 최종 삭제 CTA — emphasized red blur button ────────────────
+  finalDeleteBtn: {
+    width: '100%',
+    paddingVertical: 15,
+    borderRadius: Radius.md,
+    backgroundColor: '#FF4D4D',
+    alignItems: 'center',
+    shadowColor: '#FF4D4D',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  finalDeleteText: {
+    color: '#FFF',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  // ── 로그아웃 진행 오버레이 ───────────────────────────────────────────
   logoutOverlay: {
     flex: 1,
     backgroundColor: 'rgba(10,13,26,0.88)',

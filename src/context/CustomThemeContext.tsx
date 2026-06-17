@@ -10,7 +10,16 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { File, Paths } from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// expo-file-system new API (SDK 56) is native-only
+let _File: (typeof import('expo-file-system'))['File'] | null = null;
+let _Paths: (typeof import('expo-file-system'))['Paths'] | null = null;
+if (Platform.OS !== 'web') {
+  const fs = require('expo-file-system') as typeof import('expo-file-system');
+  _File = fs.File;
+  _Paths = fs.Paths;
+}
 
 // ── WCAG Contrast Guard ───────────────────────────────────────────────────────
 
@@ -139,7 +148,11 @@ const STORE_FILENAME = 'twin_theme_v1.json';
 
 async function loadStoredState(): Promise<StoredState | null> {
   try {
-    const file = new File(Paths.document, STORE_FILENAME);
+    if (Platform.OS === 'web') {
+      const raw = await AsyncStorage.getItem(STORE_FILENAME);
+      return raw ? (JSON.parse(raw) as StoredState) : null;
+    }
+    const file = new _File!(_Paths!.document, STORE_FILENAME);
     if (!file.exists) return null;
     const raw = await file.text();
     return JSON.parse(raw) as StoredState;
@@ -149,8 +162,12 @@ async function loadStoredState(): Promise<StoredState | null> {
 }
 
 function persistState(state: StoredState): void {
+  if (Platform.OS === 'web') {
+    AsyncStorage.setItem(STORE_FILENAME, JSON.stringify(state)).catch(() => {});
+    return;
+  }
   try {
-    const file = new File(Paths.document, STORE_FILENAME);
+    const file = new _File!(_Paths!.document, STORE_FILENAME);
     if (!file.exists) file.create();
     file.write(JSON.stringify(state));
   } catch {

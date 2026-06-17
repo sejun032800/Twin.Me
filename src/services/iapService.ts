@@ -24,18 +24,14 @@
  */
 
 import { Platform } from 'react-native';
-import {
-  initConnection,
-  endConnection,
-  fetchProducts,
-  requestPurchase,
-  finishTransaction,
-  purchaseUpdatedListener,
-  purchaseErrorListener,
-  isNitroReady,
-  getReceiptIOS,
-} from 'react-native-iap';
-import type { Purchase, PurchaseError, ProductSubscription } from 'react-native-iap';
+
+// react-native-iap is native-only — dynamically required so web builds compile cleanly
+type IapModule = typeof import('react-native-iap');
+let _rniap: IapModule | null = null;
+function iap(): IapModule {
+  if (!_rniap) _rniap = require('react-native-iap') as IapModule;
+  return _rniap;
+}
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -79,10 +75,14 @@ function getThemeOwnershipEndpoint(): string | null {
 
 let _isSandbox = false;
 
-try {
-  _isSandbox = !isNitroReady();
-} catch {
+if (Platform.OS === 'web') {
   _isSandbox = true;
+} else {
+  try {
+    _isSandbox = !iap().isNitroReady();
+  } catch {
+    _isSandbox = true;
+  }
 }
 
 /** Returns true when running in Expo Go / simulator without native IAP support. */
@@ -106,7 +106,7 @@ export async function initIAP(): Promise<void> {
     return;
   }
   try {
-    await initConnection();
+    await iap().initConnection();
     _connected = true;
   } catch {
     // Native IAP module unavailable (Expo Go, Android emulator, TestFlight sandbox)
@@ -123,7 +123,7 @@ export async function teardownIAP(): Promise<void> {
   if (!_connected) return;
   if (!_isSandbox) {
     try {
-      await endConnection();
+      await iap().endConnection();
     } catch {
       // endConnection can throw on Android if already disconnected — safe to ignore
     }
@@ -163,11 +163,11 @@ export async function getAvailableSubscriptions(): Promise<StoreProduct[]> {
   }
 
   try {
-    const result = await fetchProducts({
+    const result = await iap().fetchProducts({
       skus: Object.values(IAP_SKUS),
       type: 'subs',
     });
-    const subs = (result ?? []) as ProductSubscription[];
+    const subs = (result ?? []) as Array<{ id: string; displayPrice: string; title?: string; description?: string }>;
     return subs.map((s) => ({
       productId: s.id,
       localizedPrice: s.displayPrice,
@@ -238,7 +238,9 @@ export async function purchaseSubscription(planId: PlanId): Promise<Subscription
       fn();
     }
 
-    const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
+    const { purchaseUpdatedListener, purchaseErrorListener, getReceiptIOS, finishTransaction, requestPurchase } = iap();
+
+    const updateSub = purchaseUpdatedListener(async (purchase) => {
       if (purchase.productId !== sku) return;
 
       let receipt: string | undefined;
@@ -282,13 +284,13 @@ export async function purchaseSubscription(planId: PlanId): Promise<Subscription
       }
     });
 
-    const errorSub = purchaseErrorListener((err: PurchaseError) => {
+    const errorSub = purchaseErrorListener((err) => {
       if ((err as { code?: string }).code === 'E_USER_CANCELLED') {
         const cancelErr = new Error('USER_CANCELLED') as Error & { userCancelled: boolean };
         cancelErr.userCancelled = true;
         settle(() => reject(cancelErr));
       } else {
-        settle(() => reject(new Error(String(err.message ?? 'IAP_ERROR'))));
+        settle(() => reject(new Error(String((err as { message?: string }).message ?? 'IAP_ERROR'))));
       }
     });
 
@@ -327,7 +329,9 @@ export async function purchaseOneTimeProduct(sku: string): Promise<string> {
       fn();
     }
 
-    const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
+    const { purchaseUpdatedListener, purchaseErrorListener, finishTransaction, requestPurchase } = iap();
+
+    const updateSub = purchaseUpdatedListener(async (purchase) => {
       if (purchase.productId !== sku) return;
       try {
         await finishTransaction({ purchase, isConsumable: false });
@@ -343,13 +347,13 @@ export async function purchaseOneTimeProduct(sku: string): Promise<string> {
       }
     });
 
-    const errorSub = purchaseErrorListener((err: PurchaseError) => {
+    const errorSub = purchaseErrorListener((err) => {
       if ((err as { code?: string }).code === 'E_USER_CANCELLED') {
         const cancelErr = new Error('USER_CANCELLED') as Error & { userCancelled: boolean };
         cancelErr.userCancelled = true;
         settle(() => reject(cancelErr));
       } else {
-        settle(() => reject(new Error(String(err.message ?? 'IAP_ERROR'))));
+        settle(() => reject(new Error(String((err as { message?: string }).message ?? 'IAP_ERROR'))));
       }
     });
 

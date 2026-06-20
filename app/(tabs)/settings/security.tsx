@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AppState,
   Image,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -66,6 +67,15 @@ interface OTPInputProps {
 
 function OTPInput({ value, onChange, hasError, autoFocus = true }: OTPInputProps) {
   const ref = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      ref.current?.focus();
+    });
+    return () => task.cancel();
+  }, [autoFocus]);
+
   return (
     <Pressable style={s.otpRow} onPress={() => ref.current?.focus()}>
       <TextInput
@@ -77,7 +87,6 @@ function OTPInput({ value, onChange, hasError, autoFocus = true }: OTPInputProps
         maxLength={6}
         textContentType="oneTimeCode"
         caretHidden
-        autoFocus={autoFocus}
       />
       {Array.from({ length: 6 }).map((_, i) => (
         <View

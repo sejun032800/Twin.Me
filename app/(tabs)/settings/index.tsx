@@ -873,7 +873,7 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
       ) : (
         <>
           {/* Select-all header */}
-          <Pressable style={meS.selectAllRow} onPress={toggleSelectAll} disabled={isDeleting}>
+          <Pressable style={meS.selectAllRow} onPress={toggleSelectAll} disabled={isDeleting} hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}>
             <View style={[
               meS.checkbox,
               selectedIds.size === learnedMemories.length && selectedIds.size > 0
@@ -909,6 +909,7 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
                   ]}
                   onPress={() => toggleSelect(mem.id)}
                   disabled={isDeleting}
+                  hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
                 >
                   <View style={[
                     meS.checkbox,
@@ -1077,9 +1078,9 @@ const meS = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',

@@ -5,7 +5,7 @@ import { useTutorialGuard } from '../../src/hooks/useTutorialGuard';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -24,6 +24,7 @@ import {
 import Animated, {
   Easing,
   interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -31,7 +32,9 @@ import Animated, {
   withSequence,
   withSpring,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import HistoryKakaoMapView from '../../src/components/history/KakaoMapView';
 import DateMapPlanner from '../../src/components/history/DateMapPlanner';
@@ -142,55 +145,68 @@ function generateRoutePolylineSegments(
 
 type TabKey = 'archive' | 'map' | 'feed';
 
+const TABS_CONFIG: { key: TabKey; label: string }[] = [
+  { key: 'archive', label: '📸  추억 월' },
+  { key: 'map',     label: '🗺️  지도' },
+  { key: 'feed',    label: '🧭  무드 피드' },
+];
+const TAB_COUNT = TABS_CONFIG.length;
+const SCREEN_W = Dimensions.get('window').width;
+// track width = screen - marginHorizontal*2 - inner padding*2
+const INDICATOR_W = (SCREEN_W - Spacing.base * 2 - 6) / TAB_COUNT;
+
 function SegmentedControl({
   active,
   onChange,
   t,
+  swipeProgress,
 }: {
   active: TabKey;
   onChange: (k: TabKey) => void;
   t: ThemeTokens;
+  swipeProgress: SharedValue<number>;
 }) {
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: 'archive', label: '📸  추억 월' },
-    { key: 'map',     label: '🗺️  지도' },
-    { key: 'feed',    label: '🧭  무드 피드' },
-  ];
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeProgress.value * INDICATOR_W }],
+  }));
 
   return (
-    <View style={[segS.track, { backgroundColor: t.segmentTrack }]}>
-      {tabs.map((tab) => {
-        const isOn = active === tab.key;
-        return (
-          <Pressable key={tab.key} style={segS.segWrap} onPress={() => onChange(tab.key)}>
-            {isOn ? (
-              <LinearGradient
-                colors={t.gradientColors}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={segS.activeItem}
-              >
-                <Text style={segS.activeTxt}>{tab.label}</Text>
-              </LinearGradient>
-            ) : (
-              <View style={segS.inactiveItem}>
-                <Text style={[segS.inactiveTxt, { color: t.textMuted }]}>{tab.label}</Text>
-              </View>
-            )}
-          </Pressable>
-        );
-      })}
+    <View style={segS.wrapper}>
+      <View style={[segS.track, { backgroundColor: t.segmentTrack }]}>
+        {TABS_CONFIG.map((tab) => {
+          const isOn = active === tab.key;
+          return (
+            <Pressable key={tab.key} style={segS.segWrap} onPress={() => onChange(tab.key)}>
+              {isOn ? (
+                <LinearGradient
+                  colors={t.gradientColors}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={segS.activeItem}
+                >
+                  <Text style={segS.activeTxt}>{tab.label}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={segS.inactiveItem}>
+                  <Text style={[segS.inactiveTxt, { color: t.textMuted }]}>{tab.label}</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+      {/* Reactive underline — follows finger in real-time */}
+      <Animated.View style={[segS.underline, indicatorStyle]} />
     </View>
   );
 }
 
 const segS = StyleSheet.create({
+  wrapper: { marginHorizontal: Spacing.base, marginBottom: Spacing.md },
   track: {
     flexDirection: 'row',
     borderRadius: Radius.pill,
     padding: 3,
-    marginHorizontal: Spacing.base,
-    marginBottom: Spacing.md,
   },
   segWrap: { flex: 1 },
   activeItem: {
@@ -205,6 +221,13 @@ const segS = StyleSheet.create({
   },
   activeTxt:  { color: '#fff', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   inactiveTxt: { fontSize: FontSize.sm, fontWeight: FontWeight.medium },
+  underline: {
+    height: 2,
+    width: INDICATOR_W,
+    borderRadius: 1,
+    backgroundColor: '#7C3AED',
+    marginTop: 4,
+  },
 });
 
 // ─── Polaroid gradient palettes (fallback when no real photo) ─────────────────
@@ -4751,6 +4774,8 @@ const helixEmptyS = StyleSheet.create({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
+const TABS_KEYS: TabKey[] = ['archive', 'map', 'feed'];
+
 function HistoryScreenContent() {
   const [activeTab, setActiveTab] = useState<TabKey>('archive');
   const { themeTokens } = useAppContext();
@@ -4760,6 +4785,59 @@ function HistoryScreenContent() {
   const refSegment = useRef<View>(null);
   const refHeader = useRef<View>(null);
   const refContent = useRef<View>(null);
+
+  // ── Swipe gesture shared state ─────────────────────────────────────────────
+  const currentIndexSv = useSharedValue(0);
+  const swipeProgress = useSharedValue(0);   // drives underline indicator (0–2)
+  const contentTranslateX = useSharedValue(0); // drives horizontal slide
+
+  const contentSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: contentTranslateX.value }],
+  }));
+
+  // JS-thread callback invoked from worklet via runOnJS
+  const applyTabByIndex = useCallback((idx: number) => {
+    setActiveTab(TABS_KEYS[idx]);
+  }, []);
+
+  // Keep SharedValues in sync when tab changes via button press
+  useEffect(() => {
+    const idx = TABS_KEYS.indexOf(activeTab);
+    currentIndexSv.value = idx;
+    swipeProgress.value = withSpring(idx, { damping: 20, stiffness: 300 });
+    contentTranslateX.value = withSpring(-idx * SCREEN_W, { damping: 20, stiffness: 300 });
+  }, [activeTab, currentIndexSv, swipeProgress, contentTranslateX]);
+
+  // ── Pan gesture: horizontal swipe switches tabs ────────────────────────────
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-20, 20])
+    .onUpdate((e) => {
+      'worklet';
+      const baseX = -currentIndexSv.value * SCREEN_W;
+      const clamped = Math.max(
+        -(TABS_KEYS.length - 1) * SCREEN_W,
+        Math.min(0, baseX + e.translationX),
+      );
+      contentTranslateX.value = clamped;
+      // Drive underline in real-time
+      const progress = -clamped / SCREEN_W;
+      swipeProgress.value = Math.max(0, Math.min(TABS_KEYS.length - 1, progress));
+    })
+    .onEnd((e) => {
+      'worklet';
+      const idx = currentIndexSv.value;
+      const shouldSwitch = Math.abs(e.translationX) > 60 || Math.abs(e.velocityX) > 500;
+      let nextIdx = idx;
+      if (shouldSwitch) {
+        if (e.translationX < 0) nextIdx = Math.min(TABS_KEYS.length - 1, idx + 1);
+        else nextIdx = Math.max(0, idx - 1);
+      }
+      currentIndexSv.value = nextIdx;
+      swipeProgress.value = withSpring(nextIdx, { damping: 20, stiffness: 300 });
+      contentTranslateX.value = withSpring(-nextIdx * SCREEN_W, { damping: 20, stiffness: 300 });
+      if (nextIdx !== idx) runOnJS(applyTabByIndex)(nextIdx);
+    });
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -4791,18 +4869,30 @@ function HistoryScreenContent() {
         <ScreenHeader t={t} />
       </View>
       <View ref={refSegment} collapsable={false}>
-        <SegmentedControl active={activeTab} onChange={setActiveTab} t={t} />
+        <SegmentedControl
+          active={activeTab}
+          onChange={setActiveTab}
+          t={t}
+          swipeProgress={swipeProgress}
+        />
       </View>
 
-      <View ref={refContent} collapsable={false} style={{ flex: 1 }}>
-        {activeTab === 'archive' ? (
-          <ArchiveView t={t} />
-        ) : activeTab === 'map' ? (
-          <DateMapView t={t} />
-        ) : (
-          <MoodFeedView t={t} />
-        )}
-      </View>
+      {/* GestureDetector wraps only the scrollable content area */}
+      <GestureDetector gesture={panGesture}>
+        <View ref={refContent} collapsable={false} style={{ flex: 1, overflow: 'hidden' }}>
+          <Animated.View style={[{ flexDirection: 'row', flex: 1 }, contentSlideStyle]}>
+            <View style={{ width: SCREEN_W, flex: 1 }}>
+              <ArchiveView t={t} />
+            </View>
+            <View style={{ width: SCREEN_W, flex: 1 }}>
+              <DateMapView t={t} />
+            </View>
+            <View style={{ width: SCREEN_W, flex: 1 }}>
+              <MoodFeedView t={t} />
+            </View>
+          </Animated.View>
+        </View>
+      </GestureDetector>
 
       {/* ── 신규 유저 스포트라이트 튜토리얼 ── */}
       <TabTutorialOverlay

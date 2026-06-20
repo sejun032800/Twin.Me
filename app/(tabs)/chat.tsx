@@ -23,6 +23,7 @@ import Animated, {
   FadeIn,
   FadeInRight,
   interpolate,
+  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -1577,6 +1578,18 @@ function ChatRoomView({
   const pendingMessages = useRef<string[]>([]);
   const lastSendTimeRef = useRef<number>(0);
 
+  // ── Send button micro-motion: scale pop + green flash ───────────────────────
+  const sendBtnScale = useSharedValue(1);
+  const sendBtnFlash = useSharedValue(0); // 0 = brand violet, 1 = success green
+  const sendBtnAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: sendBtnScale.value }],
+    backgroundColor: interpolateColor(
+      sendBtnFlash.value,
+      [0, 1],
+      ['#7C3AED', '#10B981'],
+    ),
+  }));
+
   // Step #23: watch LLM-computed crisis score — fire modal once per crisis episode
   useEffect(() => {
     if (crisisResult?.crisisModalTrigger && !crisisModalShownRef.current) {
@@ -1877,6 +1890,12 @@ function ChatRoomView({
     lastSendTimeRef.current = now;
 
     addMessage({ id: `u-${now}`, role: 'user', text, timestamp: now, type: 'normal' });
+
+    // 0.3s green flash confirmation
+    sendBtnFlash.value = withSequence(
+      withTiming(1, { duration: 80 }),
+      withTiming(0, { duration: 220 }),
+    );
 
     if (roomType === 'partner') streamState.tapMessage(text);
 
@@ -2189,14 +2208,20 @@ function ChatRoomView({
             returnKeyType="send"
             onSubmitEditing={handleSend}
           />
-          <TouchableOpacity
-            style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
+          <Pressable
             onPress={handleSend}
+            onPressIn={() => { sendBtnScale.value = withTiming(0.92, { duration: 70 }); }}
+            onPressOut={() => { sendBtnScale.value = withSpring(1, { damping: 12, stiffness: 250 }); }}
             disabled={!inputText.trim()}
-            activeOpacity={0.8}
           >
-            <Text style={styles.sendBtnText}>↑</Text>
-          </TouchableOpacity>
+            <Animated.View style={[
+              styles.sendBtn,
+              !inputText.trim() && styles.sendBtnDisabled,
+              sendBtnAnimStyle,
+            ]}>
+              <Text style={styles.sendBtnText}>↑</Text>
+            </Animated.View>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
 

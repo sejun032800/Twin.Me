@@ -14,7 +14,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext, type LinkedProvider } from '../../../src/context/AppContext';
+import { useCustomTheme } from '../../../src/context/CustomThemeContext';
 import { FontSize, FontWeight, Radius, Spacing, type ThemeTokens } from '../../../src/styles/theme';
+import { OCEAN_THEME_ID, OceanTokens } from '../../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahTokens } from '../../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkTokens } from '../../../src/styles/pastelPink';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -30,15 +34,21 @@ interface ProviderConfig {
   logo: string;
 }
 
-function getProviders(isLight: boolean): ProviderConfig[] {
+function getProviders(isLight: boolean, isOcean: boolean, isSavannah: boolean, isPastel: boolean): ProviderConfig[] {
   return [
     {
       id: 'GOOGLE',
       label: 'Google',
       sublabel: 'Gmail · Google 계정',
-      bgColor:     isLight ? '#FFFFFF' : '#131314',
-      borderColor: isLight ? '#DADCE0' : '#8E918F',
-      textColor:   isLight ? '#202124' : '#E3E3E3',
+      bgColor:     (isOcean || isSavannah || isPastel) ? '#FFFFFF' : (isLight ? '#FFFFFF' : '#131314'),
+      borderColor: isOcean
+        ? OceanTokens.AQUA_MUTED
+        : isSavannah
+          ? SavannahTokens.AMBER_MUTED
+          : isPastel
+            ? PastelPinkTokens.PASTEL_MUTED
+            : (isLight ? '#DADCE0' : '#8E918F'),
+      textColor:   (isOcean || isSavannah || isPastel) ? '#202124' : (isLight ? '#202124' : '#E3E3E3'),
       logo: 'G',
     },
     {
@@ -185,6 +195,10 @@ function ProviderButton({
 export default function AccountLinkScreen() {
   const router = useRouter();
   const { userAccount, linkSocialAccount, themeTokens } = useAppContext();
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const t = themeTokens;
 
   const [loadingProvider, setLoadingProvider] = useState<LinkedProvider | null>(null);
@@ -256,7 +270,7 @@ export default function AccountLinkScreen() {
         <View style={s.section}>
           <Text style={[s.sectionTitle, { color: t.textMuted }]}>연동 가능한 계정</Text>
           <View style={s.providerList}>
-            {getProviders(t.isLight).map((config) => {
+            {getProviders(t.isLight, isOcean, isSavannah, isPastel).map((config) => {
               const isLinked = userAccount.linkedProviders.includes(config.id);
               const isLoading = loadingProvider === config.id;
               return (

@@ -40,6 +40,7 @@ import MemoryRingSection from '../../src/components/home/MemoryRingSection';
 import MetricsGrid from '../../src/components/home/MetricsGrid';
 import MoodTemperatureSection from '../../src/components/home/MoodTemperatureSection';
 import { useAppContext } from '../../src/context/AppContext';
+import { useCustomTheme } from '../../src/context/CustomThemeContext';
 import {
   Colors,
   FontSize,
@@ -48,6 +49,9 @@ import {
   Spacing,
   TabBar,
 } from '../../src/styles/theme';
+import { OCEAN_THEME_ID, OceanTokens } from '../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahTokens } from '../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkTokens } from '../../src/styles/pastelPink';
 import TabTutorialOverlay, { TutorialStep } from '../../src/components/onboarding/TabTutorialOverlay';
 import { useTutorialGuard } from '../../src/hooks/useTutorialGuard';
 import {
@@ -156,6 +160,10 @@ function OverflowBanner({
 
 function DNAScoreCard() {
   const { currentScore, themeTokens } = useAppContext();
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const t = themeTokens;
 
   const tier = getRelationshipTier(currentScore);
@@ -199,8 +207,20 @@ function DNAScoreCard() {
         style={s.dnaCardBg}
       />
       <View style={[s.dnaCardInner, {
-        borderColor: tier.theme.borderColor,
-        backgroundColor: t.isLight ? 'rgba(255,255,255,0.88)' : 'rgba(10,13,26,0.88)',
+        borderColor: isOcean
+          ? OceanTokens.LAGOON_TEAL + '55'
+          : isSavannah
+            ? SavannahTokens.BURNING_SUN + '55'
+            : isPastel
+              ? PastelPinkTokens.BUBBLE_PINK + '66'
+              : tier.theme.borderColor,
+        backgroundColor: isOcean
+          ? OceanTokens.DEEP_OCEAN
+          : isSavannah
+            ? SavannahTokens.DUSK_DEEP
+            : isPastel
+              ? (t.isLight ? PastelPinkTokens.MILKY_CREAM : PastelPinkTokens.DEEP_MIDNIGHT)
+              : (t.isLight ? 'rgba(255,255,255,0.88)' : 'rgba(10,13,26,0.88)'),
       }]}>
         {/* 상단 라벨 */}
         <Text style={[s.dnaLabel, { color: t.textSecondary }]}>
@@ -226,9 +246,23 @@ function DNAScoreCard() {
           />
           {/* 중앙 원 */}
           <View style={[s.scoreCircleInner, {
-            backgroundColor: t.isLight ? '#FFFFFF' : '#0A0D1A',
+            backgroundColor: isOcean
+              ? OceanTokens.DEEP_OCEAN
+              : isSavannah
+                ? SavannahTokens.DUSK_DEEP
+                : isPastel
+                  ? (t.isLight ? PastelPinkTokens.MILKY_CREAM : PastelPinkTokens.DEEP_MIDNIGHT)
+                  : (t.isLight ? '#FFFFFF' : '#0A0D1A'),
           }]}>
-            <Text style={[s.scoreNum, { color: tier.theme.textColor }]}>
+            <Text style={[s.scoreNum, {
+              color: isOcean
+                ? OceanTokens.COASTAL_SAND
+                : isSavannah
+                  ? SavannahTokens.BURNING_SUN
+                  : isPastel
+                    ? PastelPinkTokens.BUBBLE_PINK
+                    : tier.theme.textColor,
+            }]}>
               {displayScore}%
             </Text>
           </View>

@@ -18,6 +18,8 @@ export interface KakaoMapProps {
   panTarget?: { lat: number; lng: number } | null;
   courseRoute?: Array<{ latitude: number; longitude: number }>;
   userLocation?: { lat: number; lng: number };
+  /** 지도 코스 핀 액센트 색상 (테마 오버라이드용). 기본값: '#7C3AED' */
+  pinAccentColor?: string;
 }
 
 const JS_KEY = process.env.EXPO_PUBLIC_KAKAO_JS_KEY ?? '';
@@ -154,14 +156,20 @@ const syncCandidatePlacesFn = isMockMode
 
 // ── Inline HTML ───────────────────────────────────────────────────────────────
 
-export function buildHTML(): string {
+export function buildHTML(pinAccentColor?: string): string {
+  const pinPrimary   = pinAccentColor ?? '#7C3AED';
+  const pinSecondary = pinAccentColor ?? '#A855F7';
+  const pinGlowRaw   = pinAccentColor
+    ? pinAccentColor.replace('#', '').match(/.{2}/g)!.map(h => parseInt(h,16)).join(',')
+    : '124,58,237';
+
   const courseMarkerFn = isMockMode
     ? `
       function renderCourseMarker(course) {
         var avg = ((course.myRating + course.partnerRating) / 2).toFixed(1);
         var isPending = course.myRating === 0 && course.partnerRating === 0;
-        var pinBg   = isPending ? 'linear-gradient(135deg,#FF6B8B,#F472B6)' : 'linear-gradient(135deg,#7C3AED,#A855F7)';
-        var pinGlow = isPending ? '0 3px 14px rgba(255,107,139,.75)' : '0 3px 14px rgba(124,58,237,.75)';
+        var pinBg   = isPending ? 'linear-gradient(135deg,#FF6B8B,#F472B6)' : 'linear-gradient(135deg,${pinPrimary},${pinSecondary})';
+        var pinGlow = isPending ? '0 3px 14px rgba(255,107,139,.75)' : '0 3px 14px rgba(${pinGlowRaw},.75)';
         var icon = L.divIcon({
           className: '',
           html: '<div style="width:28px;height:28px;background:' + pinBg + ';border-radius:50% 50% 0 50%;transform:rotate(45deg);border:2.5px solid #fff;box-shadow:' + pinGlow + ';"></div>',
@@ -182,8 +190,8 @@ export function buildHTML(): string {
         var pos = new kakao.maps.LatLng(course.latitude, course.longitude);
         var avg = ((course.myRating + course.partnerRating) / 2).toFixed(1);
         var isPending = course.myRating === 0 && course.partnerRating === 0;
-        var pinBg   = isPending ? 'linear-gradient(135deg,#FF6B8B,#F472B6)' : 'linear-gradient(135deg,#7C3AED,#A855F7)';
-        var pinGlow = isPending ? '0 3px 14px rgba(255,107,139,.75)' : '0 3px 14px rgba(124,58,237,.75)';
+        var pinBg   = isPending ? 'linear-gradient(135deg,#FF6B8B,#F472B6)' : 'linear-gradient(135deg,${pinPrimary},${pinSecondary})';
+        var pinGlow = isPending ? '0 3px 14px rgba(255,107,139,.75)' : '0 3px 14px rgba(${pinGlowRaw},.75)';
         var content = '<div style="width:28px;height:28px;background:' + pinBg + ';border-radius:50% 50% 0 50%;transform:rotate(45deg);border:2.5px solid #fff;box-shadow:' + pinGlow + ';cursor:pointer;"></div>';
         var overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, zIndex: 3 });
         overlay.setMap(map);

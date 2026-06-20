@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { useAppContext } from '../../context/AppContext';
+import { useCustomTheme } from '../../context/CustomThemeContext';
 import {
   CoachingMessage,
   FALLBACK_MESSAGE,
@@ -22,13 +23,16 @@ import {
   Spacing,
   ThemeTokens,
 } from '../../styles/theme';
+import { OCEAN_THEME_ID, OceanTokens } from '../../styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahTokens } from '../../styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkTokens } from '../../styles/pastelPink';
 
 // ── Typing animation constants ───────────────────────────────────────────────
 const CHARS_PER_TICK = 3;
 const TICK_MS = 40;
 
 // ── Typing dots: 3-dot bounce indicator for loading state ───────────────────
-function TypingDots() {
+function TypingDots({ dotColor }: { dotColor: string }) {
   const d1 = useRef(new Animated.Value(0)).current;
   const d2 = useRef(new Animated.Value(0)).current;
   const d3 = useRef(new Animated.Value(0)).current;
@@ -56,7 +60,10 @@ function TypingDots() {
   return (
     <View style={dotStyles.row}>
       {([d1, d2, d3] as Animated.Value[]).map((dot, i) => (
-        <Animated.View key={i} style={[dotStyles.dot, { transform: [{ translateY: dot }] }]} />
+        <Animated.View
+          key={i}
+          style={[dotStyles.dot, { backgroundColor: dotColor, transform: [{ translateY: dot }] }]}
+        />
       ))}
     </View>
   );
@@ -64,7 +71,7 @@ function TypingDots() {
 
 const dotStyles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.GRADIENT_START },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });
 
 // ── Category style map ───────────────────────────────────────────────────────
@@ -85,6 +92,18 @@ interface Props {
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function AICoachingCard({ t }: Props) {
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
+  const dotColor = isOcean
+    ? OceanTokens.LAGOON_TEAL_LIGHT
+    : isSavannah
+      ? SavannahTokens.BURNING_SUN_LIGHT
+      : isPastel
+        ? PastelPinkTokens.MANDARIN_SUN
+        : Colors.GRADIENT_START;
+
   const {
     coupleId,
     myProfile,
@@ -270,7 +289,7 @@ export default function AICoachingCard({ t }: Props) {
       {/* Coaching text body */}
       {isLoading && !message ? (
         <View style={styles.loadingContainer}>
-          <TypingDots />
+          <TypingDots dotColor={dotColor} />
         </View>
       ) : (
         <Text style={[styles.coachingBody, { color: t.textSecondary }]}>

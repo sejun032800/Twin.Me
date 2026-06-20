@@ -189,7 +189,7 @@ function ThemeCard({
   const handleBtnPress = () => {
     if (isActive) {
       onReset();
-    } else if (isOwned) {
+    } else if (isOwned || spec.isFree) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       btnScale.value = withSequence(
         withTiming(0.93, { duration: 60 }),
@@ -293,7 +293,7 @@ function ThemeCard({
               <View style={[tcS.btnGrad, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
                 <Text style={[tcS.btnText, { color: spec.accentPrimary }]}>✕ 기본 테마로 돌아가기</Text>
               </View>
-            ) : isOwned ? (
+            ) : (isOwned || spec.isFree) ? (
               <LinearGradient
                 colors={[spec.accentPrimary, spec.accentSecondary]}
                 start={{ x: 0, y: 0.5 }}
@@ -301,7 +301,7 @@ function ThemeCard({
                 style={tcS.btnGrad}
               >
                 <Text style={[tcS.btnText, { color: '#000', fontWeight: FontWeight.bold }]}>
-                  ✦ 적용하기
+                  {spec.isFree ? '🌊 무료로 적용하기' : '✦ 적용하기'}
                 </Text>
               </LinearGradient>
             ) : (
@@ -771,7 +771,7 @@ export function ThemeShop({ visible, onClose, t }: ThemeShopProps) {
             <ThemeCard
               key={spec.id}
               spec={spec}
-              isOwned={ownedThemeIds.includes(spec.id)}
+              isOwned={ownedThemeIds.includes(spec.id) || spec.isFree === true}
               isActive={activeTheme?.id === spec.id}
               isPurchasing={purchasingId === spec.id}
               onPurchase={handlePurchase}

@@ -11,7 +11,12 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, FontWeight } from '../../src/styles/theme';
+import { useCustomTheme } from '../../src/context/CustomThemeContext';
+import { OCEAN_THEME_ID, OceanGradients, OceanTokens } from '../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahGradients, SavannahTokens } from '../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkGradients, PastelPinkTokens } from '../../src/styles/pastelPink';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -120,6 +125,10 @@ function DnaLogo() {
 
 export default function SplashScreen() {
   const router = useRouter();
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const [phase, setPhase] = useState<'eq' | 'logo' | 'tagline'>('eq');
 
   useEffect(() => {
@@ -130,7 +139,39 @@ export default function SplashScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      isOcean && { backgroundColor: OceanTokens.DEEP_OCEAN },
+      isSavannah && { backgroundColor: SavannahTokens.DUSK_DEEP },
+      isPastel && { backgroundColor: PastelPinkTokens.PIECE_CORAL },
+    ]}>
+      {/* Ocean 테마 수직 그라데이션 배경 */}
+      {isOcean && (
+        <LinearGradient
+          colors={OceanGradients.SPLASH_BG}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      )}
+      {/* Savannah 테마 수직 그라데이션 배경 */}
+      {isSavannah && (
+        <LinearGradient
+          colors={SavannahGradients.SPLASH_BG}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      )}
+      {/* Pastel Pink 시그니처 4색 수직 그라데이션 */}
+      {isPastel && (
+        <LinearGradient
+          colors={PastelPinkGradients.SPLASH_BG}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      )}
       {/* EQ bars — always rendered, collapse prop drives exit animation */}
       <View style={styles.eqRow}>
         {Array.from({ length: BAR_COUNT }).map((_, i) => (

@@ -26,6 +26,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, FontSize, FontWeight, Radius, Shadows, Spacing } from '../../styles/theme';
 import { useAppContext } from '../../context/AppContext';
+import { useCustomTheme } from '../../context/CustomThemeContext';
+import { OCEAN_THEME_ID } from '../../styles/ocean';
+import { SAVANNAH_THEME_ID } from '../../styles/savannah';
+import { PASTEL_PINK_THEME_ID } from '../../styles/pastelPink';
 import type {
   AuditLogEntry,
   BestMomentLog,
@@ -265,6 +269,11 @@ function BestMomentSection({
   isPremium: boolean;
   partnerName: string;
 }) {
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
+
   if (!isPremium) {
     return (
       <View style={rStyles.sectionCard}>
@@ -287,9 +296,22 @@ function BestMomentSection({
     <View style={rStyles.sectionCard}>
       <Text style={rStyles.sectionTitle}>💫 티키타카 Best 모먼트</Text>
       <Text style={rStyles.bestMomentSubtitle}>이번 주 감정 동기화 최고점 구간을 재현했어요</Text>
-      <View style={rStyles.bubbleFrame}>
+      <View style={[
+        rStyles.bubbleFrame,
+        isOcean && { borderColor: 'rgba(80,154,150,0.35)' },
+        isSavannah && { borderColor: 'rgba(255,107,0,0.35)' },
+        isPastel && { borderColor: 'rgba(249,161,188,0.45)' },
+      ]}>
         <LinearGradient
-          colors={['rgba(255,107,139,0.12)', 'rgba(217,70,239,0.08)', 'rgba(124,58,237,0.06)']}
+          colors={
+            isOcean
+              ? ['rgba(80,154,150,0.12)', 'rgba(108,178,167,0.08)', 'rgba(80,154,150,0.06)']
+              : isSavannah
+                ? ['rgba(255,107,0,0.14)', 'rgba(255,159,41,0.09)', 'rgba(209,163,255,0.07)']
+                : isPastel
+                  ? ['rgba(249,161,188,0.16)', 'rgba(196,140,185,0.10)', 'rgba(255,191,134,0.07)']
+                  : ['rgba(255,107,139,0.12)', 'rgba(217,70,239,0.08)', 'rgba(124,58,237,0.06)']
+          }
           style={StyleSheet.absoluteFill}
         />
         {logs.map((log, i) => {
@@ -297,14 +319,26 @@ function BestMomentSection({
           return (
             <View key={i} style={[rStyles.bubbleRow, isMe ? rStyles.bubbleRowMe : rStyles.bubbleRowPartner]}>
               {!isMe && (
-                <View style={rStyles.partnerBubbleAvatar}>
+                <View style={[
+                  rStyles.partnerBubbleAvatar,
+                  isOcean && { backgroundColor: 'rgba(80,154,150,0.35)' },
+                  isSavannah && { backgroundColor: 'rgba(255,107,0,0.35)' },
+                  isPastel && { backgroundColor: 'rgba(255,166,158,0.40)' },
+                ]}>
                   <Text style={rStyles.partnerBubbleAvatarText}>
                     {partnerName.charAt(0)}
                   </Text>
                 </View>
               )}
               <View>
-                <View style={[rStyles.chatBubble, isMe ? rStyles.chatBubbleMe : rStyles.chatBubblePartner]}>
+                <View style={[
+                  rStyles.chatBubble,
+                  isMe ? rStyles.chatBubbleMe : rStyles.chatBubblePartner,
+                  !isMe && isOcean && { backgroundColor: 'rgba(80,154,150,0.28)', borderColor: 'rgba(108,178,167,0.5)' },
+                  !isMe && isSavannah && { backgroundColor: 'rgba(255,107,0,0.22)', borderColor: 'rgba(255,159,41,0.55)' },
+                  !isMe && isPastel && { backgroundColor: 'rgba(255,166,158,0.25)', borderColor: 'rgba(249,161,188,0.55)' },
+                  isMe && isPastel && { backgroundColor: 'rgba(196,140,185,0.28)', borderColor: 'rgba(196,140,185,0.55)' },
+                ]}>
                   <Text style={[rStyles.chatBubbleText, isMe ? rStyles.chatBubbleTextMe : rStyles.chatBubbleTextPartner]}>
                     {log.text}
                   </Text>

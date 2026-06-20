@@ -78,6 +78,10 @@ import {
 import { ThemeShop, ThemeShopEntryCard } from '../../../src/components/settings/ThemeShop';
 import { HelpCenter } from '../../../src/components/settings/HelpCenter';
 import { runKakaoSyncPipeline } from '../../../src/services/kakaoUploadService';
+import { useCustomTheme } from '../../../src/context/CustomThemeContext';
+import { OCEAN_THEME_ID, OceanTokens, OceanGradients } from '../../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahTokens, SavannahGradients } from '../../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkTokens, PastelPinkGradients } from '../../../src/styles/pastelPink';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -1409,6 +1413,10 @@ interface PlanCardProps {
 
 function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
   const { subscriptionStatus, themeTokens } = useAppContext();
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const isLight = themeTokens.isLight;
   const scale   = useSharedValue(1);
   const shimmer = useSharedValue(0);
@@ -1509,19 +1517,50 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
           <Text style={styles.planEmoji}>{plan.emoji}</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.planName}>{plan.name}</Text>
-            <Text style={styles.planDesc}>{plan.desc}</Text>
+            <Text style={[
+              styles.planDesc,
+              isOcean && { color: OceanTokens.AQUA_MUTED },
+              isSavannah && { color: SavannahTokens.AMBER_MUTED },
+              isPastel && { color: PastelPinkTokens.PASTEL_MUTED },
+            ]}>{plan.desc}</Text>
           </View>
           <View style={styles.planPriceBox}>
-            <Text style={[styles.planPrice, { color: plan.accentColor }]}>{plan.price}</Text>
-            <Text style={styles.planPeriod}>{plan.period}</Text>
+            <Text style={[styles.planPrice, {
+              color: isOcean
+                ? OceanTokens.LAGOON_TEAL_LIGHT
+                : isSavannah
+                  ? SavannahTokens.BURNING_SUN_LIGHT
+                  : isPastel
+                    ? PastelPinkTokens.BUBBLE_PINK
+                    : plan.accentColor,
+            }]}>{plan.price}</Text>
+            <Text style={[
+              styles.planPeriod,
+              isOcean && { color: OceanTokens.AQUA_MUTED },
+              isSavannah && { color: SavannahTokens.AMBER_MUTED },
+              isPastel && { color: PastelPinkTokens.PASTEL_MUTED },
+            ]}>{plan.period}</Text>
           </View>
         </View>
 
         <View style={styles.planPerks}>
           {plan.perks.map((p) => (
             <View key={p} style={styles.perkRow}>
-              <Text style={[styles.perkDot, { color: plan.accentColor }]}>✓</Text>
-              <Text style={styles.perkText}>{p}</Text>
+              <Text style={[styles.perkDot, {
+                color: isOcean
+                  ? OceanTokens.LAGOON_TEAL
+                  : isSavannah
+                    ? SavannahTokens.BURNING_SUN
+                    : isPastel
+                      ? PastelPinkTokens.LAVENDER_VIBE
+                      : plan.accentColor,
+              }]}>✓</Text>
+              <Text style={[
+                styles.perkText,
+                isOcean && { color: OceanTokens.COASTAL_SAND_LIGHT },
+                isSavannah && { color: SavannahTokens.SAND_LIGHT },
+                isPastel && { color: PastelPinkTokens.DEEP_MIDNIGHT },
+              ]}>{p}</Text>
             </View>
           ))}
         </View>
@@ -1536,7 +1575,15 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
         >
           {isThisPurchasing ? (
             <LinearGradient
-              colors={isLight ? ['#FFB7CE', '#B39DDB'] : ['#7C3AED', '#D946EF', '#FF6B8B']}
+              colors={
+                isOcean
+                  ? OceanGradients.CTA_OCEAN
+                  : isSavannah
+                    ? SavannahGradients.CTA_SUNSET
+                    : isPastel
+                      ? PastelPinkGradients.CTA_PASTEL
+                      : (isLight ? ['#FFB7CE', '#B39DDB'] : ['#7C3AED', '#D946EF', '#FF6B8B'])
+              }
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.buyGradient}
@@ -1546,9 +1593,15 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
           ) : (
             <LinearGradient
               colors={
-                isSubscribedToThis
-                  ? (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#F59E0B'] as const))
-                  : (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#D946EF', '#FF6B8B'] as const))
+                isOcean
+                  ? OceanGradients.CTA_OCEAN
+                  : isSavannah
+                    ? SavannahGradients.CTA_SUNSET
+                    : isPastel
+                      ? PastelPinkGradients.CTA_PASTEL
+                      : isSubscribedToThis
+                        ? (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#F59E0B'] as const))
+                        : (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#D946EF', '#FF6B8B'] as const))
               }
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
@@ -1556,9 +1609,15 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
             >
               <Text style={[
                 styles.buyText,
-                isLight
-                  ? { color: '#2D1B5A' }
-                  : { color: '#fff', textShadowColor: 'rgba(15, 23, 42, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+                isOcean
+                  ? { color: OceanTokens.DEEP_OCEAN, fontWeight: FontWeight.bold }
+                  : isSavannah
+                    ? { color: SavannahTokens.DUSK_DEEP, fontWeight: FontWeight.bold }
+                    : isPastel
+                      ? { color: PastelPinkTokens.DEEP_MIDNIGHT, fontWeight: FontWeight.bold }
+                      : isLight
+                        ? { color: '#2D1B5A' }
+                        : { color: '#fff', textShadowColor: 'rgba(15, 23, 42, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
               ]}>
                 {isSubscribedToThis ? '✅ 구독 중' : '구독 시작하기'}
               </Text>

@@ -3,14 +3,12 @@
  * Web platform uses KakaoMapView.web.tsx (iframe, no react-native-webview).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { buildHTML, KakaoMapProps as Props } from './kakaoMapHTML';
 
 // ── Component ─────────────────────────────────────────────────────────────────
-
-const HTML = buildHTML();
 
 export default function KakaoMapView({
   courses,
@@ -23,8 +21,12 @@ export default function KakaoMapView({
   panTarget,
   courseRoute,
   userLocation,
+  pinAccentColor,
 }: Props) {
   const webViewRef = useRef<WebView>(null);
+
+  // Rebuild HTML only when pin accent changes (theme switch)
+  const html = useMemo(() => buildHTML(pinAccentColor), [pinAccentColor]);
 
   const post = (obj: object) => {
     webViewRef.current?.injectJavaScript(
@@ -71,7 +73,7 @@ export default function KakaoMapView({
     <WebView
       ref={webViewRef}
       style={styles.map}
-      source={{ html: HTML }}
+      source={{ html }}
       originWhitelist={['*']}
       javaScriptEnabled
       domStorageEnabled

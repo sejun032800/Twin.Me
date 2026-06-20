@@ -70,6 +70,10 @@ import {
   TabBar,
   ThemeTokens,
 } from '../../src/styles/theme';
+import { useCustomTheme } from '../../src/context/CustomThemeContext';
+import { OCEAN_THEME_ID, OceanTokens } from '../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahTokens } from '../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkTokens } from '../../src/styles/pastelPink';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -1387,6 +1391,10 @@ const sheetS = StyleSheet.create({
 // ─── CourseListCard ───────────────────────────────────────────────────────────
 
 function CourseListCard({ course, t }: { course: DateCourse; t: ThemeTokens }) {
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const isPending = course.myRating === 0 && course.partnerRating === 0;
   const avg = ((course.myRating + course.partnerRating) / 2).toFixed(1);
   return (
@@ -1401,7 +1409,13 @@ function CourseListCard({ course, t }: { course: DateCourse; t: ThemeTokens }) {
         },
       ]}
     >
-      <View style={[cListS.pinDot, isPending && { backgroundColor: '#FF6B8B' }]} />
+      <View style={[
+        cListS.pinDot,
+        isOcean && { backgroundColor: OceanTokens.LAGOON_TEAL },
+        isSavannah && { backgroundColor: SavannahTokens.BURNING_SUN },
+        isPastel && { backgroundColor: PastelPinkTokens.BUBBLE_PINK },
+        isPending && { backgroundColor: '#FF6B8B' },
+      ]} />
       <View style={{ flex: 1 }}>
         <Text style={[cListS.title, { color: t.text }]} numberOfLines={1}>{course.title}</Text>
         <Text style={[cListS.date, { color: t.textMuted }]}>{course.date}</Text>
@@ -3005,6 +3019,11 @@ function makeLcpStyles(t: ThemeTokens) {
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
 function DateMapView({ t }: { t: ThemeTokens }) {
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
+
   const {
     dateCourses, addDateCourse, partnerProfile, bulkAddDateCourses, privacyLevel,
     triggerAddCourse, setTriggerAddCourse, setCurrentOOTD, setCurrentMood,
@@ -3295,6 +3314,12 @@ function DateMapView({ t }: { t: ThemeTokens }) {
           courseRoute={courseRoute}
           userLocation={geoLocation.isReal ? geoLocation.coords : undefined}
           onMapLongPress={handleMapLongPress}
+          pinAccentColor={
+            isSavannah ? SavannahTokens.BURNING_SUN
+            : isOcean   ? OceanTokens.LAGOON_TEAL
+            : isPastel  ? PastelPinkTokens.BUBBLE_PINK
+            : undefined
+          }
         />
 
         {/* ── Empty-state onboarding guide overlay ── */}
@@ -3303,8 +3328,27 @@ function DateMapView({ t }: { t: ThemeTokens }) {
             style={[mapGuideS.overlay, overlayAnimStyle]}
             pointerEvents="none"
           >
-            <View style={mapGuideS.card}>
-              <Text style={mapGuideS.text}>
+            <View style={[
+              mapGuideS.card,
+              isOcean && {
+                backgroundColor: `rgba(13,35,74,0.85)`,
+                borderColor: `rgba(80,154,150,0.35)`,
+              },
+              isSavannah && {
+                backgroundColor: 'rgba(14,14,38,0.85)',
+                borderColor: 'rgba(255,107,0,0.40)',
+              },
+              isPastel && {
+                backgroundColor: 'rgba(249,161,188,0.15)',
+                borderColor: 'rgba(196,140,185,0.45)',
+              },
+            ]}>
+              <Text style={[
+                mapGuideS.text,
+                isOcean && { color: OceanTokens.COASTAL_SAND_LIGHT },
+                isSavannah && { color: SavannahTokens.SAND_LIGHT },
+                isPastel && { color: PastelPinkTokens.LAVENDER_VIBE },
+              ]}>
                 {'📍 지도를 롱프레스해서 첫 번째 데이트 장소를\n핀으로 꽂아보세요!'}
               </Text>
             </View>

@@ -67,9 +67,65 @@ export interface CustomThemeSpec {
   readonly auroraAnimated: boolean;
   /** Three colours used in the store card preview swatch */
   readonly previewColors: readonly [string, string, string];
+  /** True → no purchase required; theme is immediately available to all users */
+  readonly isFree?: boolean;
 }
 
 export const THEME_CATALOG: readonly CustomThemeSpec[] = [
+  {
+    id: 'pastel_pink',
+    name: 'Pastel Pink (파스텔 핑크)',
+    emoji: '🌸',
+    tagline: '성수동 힙스터 감성 — 코랄·만다린·버블핑크·라벤더 시그니처',
+    priceLabel: '무료',
+    sku: '',
+    bgColors: ['#FFA69E', '#F9A1BC', '#C48CB9'],
+    accentPrimary: '#F9A1BC',
+    accentSecondary: '#C48CB9',
+    cardBg: 'rgba(249,161,188,0.18)',
+    textColor: '#0A0D1A',
+    textSecondary: '#C48CB9',
+    fontFamily: undefined,
+    auroraAnimated: false,
+    previewColors: ['#FFA69E', '#F9A1BC', '#C48CB9'],
+    isFree: true,
+  },
+  {
+    id: 'savannah',
+    name: 'Savannah (사바나)',
+    emoji: '🌅',
+    tagline: '사바나의 여명부터 타오르는 노을까지 — 무료 테마',
+    priceLabel: '무료',
+    sku: '',
+    bgColors: ['#0E0E26', '#17153B', '#1A1240'],
+    accentPrimary: '#FF6B00',
+    accentSecondary: '#D1A3FF',
+    cardBg: 'rgba(14,14,38,0.85)',
+    textColor: '#FFE8D6',
+    textSecondary: '#F5EBE6',
+    fontFamily: undefined,
+    auroraAnimated: false,
+    previewColors: ['#0E0E26', '#FF6B00', '#D1A3FF'],
+    isFree: true,
+  },
+  {
+    id: 'the_ocean',
+    name: 'The Ocean (오션)',
+    emoji: '🌊',
+    tagline: '고요한 심해부터 따뜻한 해변까지 — 무료 테마',
+    priceLabel: '무료',
+    sku: '',
+    bgColors: ['#0D234A', '#163A6E', '#1A4A7A'],
+    accentPrimary: '#6CB2A7',   // Lagoon Teal Light — contrast on #0D234A: ~6.1:1 ✓
+    accentSecondary: '#D9CB9E', // Coastal Sand
+    cardBg: 'rgba(13,35,74,0.85)',
+    textColor: '#F2EAC4',       // Coastal Sand Light — contrast on #0D234A: ~15.5:1 ✓
+    textSecondary: '#D9CB9E',
+    fontFamily: undefined,
+    auroraAnimated: false,
+    previewColors: ['#0D234A', '#509A96', '#F2EAC4'],
+    isFree: true,
+  },
   {
     id: 'cyber_neon',
     name: '사이버 펑크 (Cyber Neon)',

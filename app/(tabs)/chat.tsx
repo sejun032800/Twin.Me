@@ -59,6 +59,10 @@ import {
   Spacing,
   ThemeTokens,
 } from '../../src/styles/theme';
+import { useCustomTheme } from '../../src/context/CustomThemeContext';
+import { OCEAN_THEME_ID, OceanTokens } from '../../src/styles/ocean';
+import { SAVANNAH_THEME_ID, SavannahGradients, SavannahTokens } from '../../src/styles/savannah';
+import { PASTEL_PINK_THEME_ID, PastelPinkGradients, PastelPinkTokens } from '../../src/styles/pastelPink';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1338,6 +1342,11 @@ function MessageBubble({
   uploadProgress?: number;
   partnerName: string;
 }) {
+  const { activeTheme } = useCustomTheme();
+  const isOcean = activeTheme?.id === OCEAN_THEME_ID;
+  const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
+  const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
+  const isWelcomeBubble = message.id === 'welcome-ai-bubble' || message.id === 'welcome-analyst-bubble';
   const isUser = message.role === 'user';
   const scale = useSharedValue(0.88);
   const opacity = useSharedValue(0);
@@ -1414,6 +1423,60 @@ function MessageBubble({
   const aiBg = t.isLight ? '#FFFFFF' : '#2D1B69';
   const aiBorder = t.isLight ? 'rgba(180,140,200,0.3)' : '#4C2B8A';
   const aiTxt = t.isLight ? '#1E293B' : '#E2D9FF';
+
+  if (!isUser && isOcean && isWelcomeBubble) {
+    return (
+      <Animated.View style={[styles.bubbleRow, styles.bubbleRowAI, animStyle]}>
+        <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+        <Pressable onLongPress={() => onLongPress(message)} delayLongPress={400}>
+          <LinearGradient
+            colors={[OceanTokens.LAGOON_TEAL, OceanTokens.LAGOON_TEAL_LIGHT]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.bubble, styles.bubbleAI, { borderColor: 'transparent' }]}
+          >
+            <Text style={[styles.bubbleText, { color: '#FFFFFF' }]}>{message.text}</Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
+    );
+  }
+
+  if (!isUser && isSavannah && isWelcomeBubble) {
+    return (
+      <Animated.View style={[styles.bubbleRow, styles.bubbleRowAI, animStyle]}>
+        <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+        <Pressable onLongPress={() => onLongPress(message)} delayLongPress={400}>
+          <LinearGradient
+            colors={SavannahGradients.WELCOME_BUBBLE}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.bubble, styles.bubbleAI, { borderColor: 'transparent' }]}
+          >
+            <Text style={[styles.bubbleText, { color: '#FFFFFF' }]}>{message.text}</Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
+    );
+  }
+
+  if (!isUser && isPastel && isWelcomeBubble) {
+    return (
+      <Animated.View style={[styles.bubbleRow, styles.bubbleRowAI, animStyle]}>
+        <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+        <Pressable onLongPress={() => onLongPress(message)} delayLongPress={400}>
+          <LinearGradient
+            colors={PastelPinkGradients.WELCOME_BUBBLE}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.bubble, styles.bubbleAI, { borderColor: 'transparent' }]}
+          >
+            <Text style={[styles.bubbleText, { color: '#FFFFFF' }]}>{message.text}</Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
+    );
+  }
 
   return (
     <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>

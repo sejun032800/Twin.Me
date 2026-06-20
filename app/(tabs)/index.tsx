@@ -11,8 +11,9 @@
  *  6. AICoachingCard
  *  7. SloganFooter
  */
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,7 +39,6 @@ import AIMemoryRingSection from '../../src/components/home/AIMemoryRingSection';
 import MemoryRingSection from '../../src/components/home/MemoryRingSection';
 import MetricsGrid from '../../src/components/home/MetricsGrid';
 import MoodTemperatureSection from '../../src/components/home/MoodTemperatureSection';
-import SloganFooter from '../../src/components/home/SloganFooter';
 import { useAppContext } from '../../src/context/AppContext';
 import {
   Colors,
@@ -273,6 +273,10 @@ export default function HomeScreen() {
   const t = themeTokens;
   const { shouldShow, markDone } = useTutorialGuard('home');
 
+  // 아코디언 & 링 탭 상태
+  const [accordionOpen, setAccordionOpen] = useState(false);
+  const [activeRingTab, setActiveRingTab] = useState<'ai' | 'memory'>('ai');
+
   // Tutorial spotlight target refs
   const refMemoryRing = useRef<View>(null);
   const refMoodTemp = useRef<View>(null);
@@ -333,49 +337,93 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* ── 1순위: 정확도 배너 (hasCompletedInterview === false 시에만 노출) ── */}
-      {accuracyBannerVisible && (
-        <AccuracyBanner
-          myName={myProfile.name}
-          onDismiss={dismissAccuracyBanner}
-          t={t}
-        />
-      )}
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!shouldShow}
       >
-        {/* ── DNA 일치율 서클 카드 (FUN-HOM-003) ── */}
-        <DNAScoreCard />
+        {/* ── ① 오늘의 연애 현황 아코디언 카드 ──────────────────────────── */}
+        <View>
+          {/* DNA 스코어 카드 — 항상 노출 */}
+          <DNAScoreCard />
 
-        {/* ── FUN-HOM-004: AI 비전 추억 링 ── */}
-        <View ref={refMemoryRing} collapsable={false}>
-          <AIMemoryRingSection t={t} />
+          {/* 인라인 슬로건 배지 */}
+          <Text style={[s.sloganBadge, { color: t.textMuted }]}>
+            "내가 없는 순간에도, 너를 가장 나답게 사랑할 또 하나의 나."
+          </Text>
+
+          {/* 아코디언 토글 버튼 */}
+          <Pressable
+            style={s.accordionToggle}
+            onPress={() => setAccordionOpen(o => !o)}
+            hitSlop={8}
+          >
+            <Text style={[s.accordionToggleText, { color: t.textMuted }]}>
+              {accordionOpen ? '▲ 간략히 보기' : '▼ 자세히 보기'}
+            </Text>
+          </Pressable>
+
+          {/* 접힘 확장 영역 — FadeInDown */}
+          {accordionOpen && (
+            <Animated.View entering={FadeInDown.duration(240)} exiting={FadeOut.duration(160)}>
+              {accuracyBannerVisible && (
+                <AccuracyBanner
+                  myName={myProfile.name}
+                  onDismiss={dismissAccuracyBanner}
+                  t={t}
+                />
+              )}
+              <View ref={refMetrics} collapsable={false}>
+                <MetricsGrid t={t} />
+              </View>
+            </Animated.View>
+          )}
         </View>
 
-        {/* ── 2순위: 데이트 코스 추억 아카이브 링 ── */}
-        <MemoryRingSection t={t} />
+        {/* ── ② 링 섹션 세그먼트 탭 ────────────────────────────────────── */}
+        <View ref={refMemoryRing} collapsable={false}>
+          {/* 탭 토글 */}
+          <View style={[s.ringTabRow, { backgroundColor: t.isLight ? 'rgba(124,58,237,0.06)' : 'rgba(124,58,237,0.10)' }]}>
+            <Pressable
+              style={[s.ringTab, activeRingTab === 'ai' && s.ringTabActive]}
+              onPress={() => setActiveRingTab('ai')}
+            >
+              <Text style={[s.ringTabText, { color: activeRingTab === 'ai' ? '#A78BFA' : t.textMuted }]}>
+                🧠 AI 메모리
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[s.ringTab, activeRingTab === 'memory' && s.ringTabActive]}
+              onPress={() => setActiveRingTab('memory')}
+            >
+              <Text style={[s.ringTabText, { color: activeRingTab === 'memory' ? '#A78BFA' : t.textMuted }]}>
+                💍 일반 메모리
+              </Text>
+            </Pressable>
+          </View>
 
-        {/* ── 3순위: 오늘의 분위기 & 우리 관계의 온도 ── */}
+          {/* 탭 콘텐츠 */}
+          {activeRingTab === 'ai' ? (
+            <Animated.View key="ai" entering={FadeIn.duration(200)}>
+              <AIMemoryRingSection t={t} />
+            </Animated.View>
+          ) : (
+            <Animated.View key="memory" entering={FadeIn.duration(200)}>
+              <MemoryRingSection t={t} />
+            </Animated.View>
+          )}
+        </View>
+
+        {/* ── ③ 오늘의 분위기 & 온도 ───────────────────────────────────── */}
         <View ref={refMoodTemp} collapsable={false}>
           <MoodTemperatureSection partnerName={partnerProfile.name} t={t} />
         </View>
 
-        {/* ── 4순위: 채팅 지수 & 감정 싱크로율 (2컬럼 그리드) ── */}
-        <View ref={refMetrics} collapsable={false}>
-          <MetricsGrid t={t} />
-        </View>
-
-        {/* ── 5순위: AI 코칭 한마디 ── */}
+        {/* ── ④ AI 코칭 한마디 ────────────────────────────────────────── */}
         <View ref={refCoaching} collapsable={false}>
           <AICoachingCard partnerName={partnerProfile.name} t={t} />
         </View>
-
-        {/* ── 6순위: 브랜드 슬로건 푸터 ── */}
-        <SloganFooter t={t} />
       </ScrollView>
 
       {/* ── 신규 유저 스포트라이트 튜토리얼 ── */}
@@ -464,6 +512,55 @@ const s = StyleSheet.create({
     color: '#FCA5A5',
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
+  },
+
+  // ── 아코디언 & 슬로건 배지 ───────────────────────────────────────────────────
+  sloganBadge: {
+    fontSize: FontSize.xs,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    opacity: 0.5,
+    paddingHorizontal: Spacing['2xl'],
+    paddingVertical: Spacing.xs,
+    letterSpacing: 0.2,
+    lineHeight: 17,
+  },
+  accordionToggle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  accordionToggleText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.4,
+    opacity: 0.6,
+  },
+
+  // ── 링 세그먼트 탭 ──────────────────────────────────────────────────────────
+  ringTabRow: {
+    flexDirection: 'row',
+    borderRadius: Radius.lg,
+    padding: 4,
+    marginHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
+    gap: 4,
+  },
+  ringTab: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+  },
+  ringTabActive: {
+    backgroundColor: 'rgba(124,58,237,0.22)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(124,58,237,0.38)',
+  },
+  ringTabText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.2,
   },
 
   // ── DNAScoreCard ────────────────────────────────────────────────────────────

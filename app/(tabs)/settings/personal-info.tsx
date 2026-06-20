@@ -50,11 +50,11 @@ export default function PersonalInfoScreen() {
     const trimmedStatus = statusMessage.trim();
 
     if (!trimmedName) {
-      Alert.alert('이름을 입력해주세요', '이름은 필수 항목입니다.');
+      Alert.alert('트윈이가 뭐라 불러야 할지 모르겠어요 🥺', '이름을 입력해 주시면 트윈이가 더 친근하게 대화할 수 있어요!');
       return;
     }
     if (trimmedName.length > NAME_MAX) {
-      Alert.alert('이름이 너무 길어요', `이름은 최대 ${NAME_MAX}자까지 입력 가능합니다.`);
+      Alert.alert('이름이 조금 길어요 ✂️', '12자 이내로 줄여주세요. 닉네임도 좋아요!');
       return;
     }
     if (trimmedStatus.length > STATUS_MAX) {

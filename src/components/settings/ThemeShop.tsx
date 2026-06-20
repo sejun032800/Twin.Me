@@ -486,7 +486,7 @@ const snkS = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 18,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     zIndex: 9999,
     shadowColor: '#7C3AED',
     shadowRadius: 18,
@@ -806,7 +806,7 @@ const shopS = StyleSheet.create({
     backgroundColor: '#0E0B1E',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(124,58,237,0.28)',
     shadowColor: '#7C3AED',
     shadowRadius: 32,
@@ -966,7 +966,7 @@ export function ThemeShopEntryCard({ t, onPress }: ThemeShopEntryCardProps) {
 const entryS = StyleSheet.create({
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: Spacing.md,
     overflow: 'hidden',
     shadowColor: '#7C3AED',

@@ -288,7 +288,7 @@ function AccordionItem({
 const accS = StyleSheet.create({
   item: {
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.07)',
     backgroundColor: 'rgba(255,255,255,0.03)',
     overflow: 'hidden',
@@ -517,7 +517,7 @@ const csS = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(124,58,237,0.3)',
     width: '100%',
   },
@@ -810,7 +810,7 @@ const hcS = StyleSheet.create({
   faqList: { gap: 5 },
   csHub: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(124,58,237,0.22)',
     padding: Spacing.base,
     alignItems: 'center',

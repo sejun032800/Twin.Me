@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   // ── 온도 카드 ──────────────────────────────────────────────────────────────
   tempCard: {
     borderRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     padding: Spacing.base,
     gap: Spacing.md,

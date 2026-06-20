@@ -398,9 +398,9 @@ function PrivacySlider({ t, onSyncError }: { t: ThemeTokens; onSyncError: () => 
       {/* ── Header + Level Badge ─────────────────────────────────────── */}
       <View style={styles.cardHeader}>
         <View style={{ gap: 3 }}>
-          <Text style={[styles.cardTitle, { color: t.text }]}>프라이버시 컨트롤 센터</Text>
+          <Text style={[styles.cardTitle, { color: t.text }]}>🛡️ AI가 우리를 얼마나 알아도 될까요?</Text>
           <Text style={[styles.cardSub, { color: t.textSecondary }]}>
-            AI 학습 데이터 수집 범위를 직접 제어하세요.
+            트윈이가 대화를 얼마나 깊이 배울지 직접 정할 수 있어요.
           </Text>
         </View>
         <View style={[styles.stageBadge, { backgroundColor: currentColor + '22', borderColor: currentColor + '44', borderWidth: 1 }]}>
@@ -817,16 +817,16 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
   return (
     <View style={[styles.dangerCard, { backgroundColor: t.card }]}>
       <LinearGradient
-        colors={['rgba(239,68,68,0.08)', 'rgba(239,68,68,0.02)']}
+        colors={['rgba(80,70,100,0.08)', 'rgba(80,70,100,0.02)']}
         style={StyleSheet.absoluteFill}
       />
 
       {/* ── Header ────────────────────────────────────────────────── */}
       <View style={styles.dangerHeader}>
         <View style={styles.dangerBadge}>
-          <Text style={styles.dangerBadgeText}>⚠️ DANGER ZONE</Text>
+          <Text style={styles.dangerBadgeText}>🧹 기억 지우개 구역</Text>
         </View>
-        <Text style={[styles.cardTitle, { color: t.text }]}>기억 삭제 디지털 지우개</Text>
+        <Text style={[styles.cardTitle, { color: t.text }]}>AI가 기억하는 것들 🌌</Text>
         <Text style={[styles.cardSub, { color: t.textSecondary }]}>
           AI가 학습한 임베딩 벡터를 선택해 벡터 DB에서 영구 파기해요.
         </Text>
@@ -948,48 +948,61 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
         </View>
       )}
 
-      {/* Action button */}
-      {!isLoading && !fetchError && !isClean && (
-        <Animated.View style={btnStyle}>
-          <Pressable
-            style={[styles.eraseButton, !canDelete && meS.eraseButtonDisabled]}
-            onPressIn={() => {
-              if (!canDelete) return;
-              btnScale.value = withSpring(0.95);
-            }}
-            onPressOut={() => { btnScale.value = withSpring(1); }}
-            onPress={handlePressDelete}
-            disabled={!canDelete}
-          >
-            {isDeleting ? (
-              <Text style={[styles.eraseButtonText, { opacity: 0.7 }]}>
-                🔥 파기 처리 중...
-              </Text>
-            ) : (
-              <Text style={styles.eraseButtonText}>
-                {selectedIds.size > 0
-                  ? `🔥 선택한 기억 ${selectedIds.size}개 영구 파기`
-                  : '항목을 선택해 주세요'}
-              </Text>
-            )}
-          </Pressable>
-        </Animated.View>
-      )}
+      {/* Extra bottom padding so last item stays visible under sticky footer */}
+      {canDelete && <View style={{ height: 80 }} />}
 
-      {/* Confirmation modal */}
-      <Modal visible={showModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: t.card }]}>
-            <Text style={styles.modalEmoji}>🚨</Text>
-            <Text style={[styles.modalTitle, { color: t.text }]}>정말로 파기하시겠어요?</Text>
-            <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
-              선택된 기억 {selectedIds.size}개를 벡터 공간에서{'\n'}완전히 소각합니다. 되돌릴 수 없어요.
+      {/* ── 스티키 푸터 — Modal transparent로 화면 레벨 고정 ─────────── */}
+      <Modal
+        visible={canDelete && !dissolving}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+      >
+        <View style={meS.stickyFooterWrapper} pointerEvents="box-none">
+          <Pressable style={meS.stickyFooterBar} onPress={handlePressDelete} pointerEvents="auto">
+            <LinearGradient
+              colors={['#EF4444', '#DC2626']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={meS.stickyFooterGrad}
+            >
+              <Text style={meS.stickyFooterText}>
+                {`${selectedIds.size}개의 기억 선택됨 · 🔥 파기하기`}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* ── 하프 바텀시트 확인 ──────────────────────────────────────────── */}
+      <Modal visible={showModal} transparent animationType="slide" statusBarTranslucent>
+        <View style={meS.halfSheetOverlay}>
+          <View style={[meS.halfSheet, { backgroundColor: t.card }]}>
+            <View style={meS.halfSheetHandle} />
+            <Text style={meS.halfSheetEmoji}>🔥</Text>
+            <Text style={[meS.halfSheetTitle, { color: t.text }]}>
+              정말 영구 파기할까요?
             </Text>
-            <Pressable style={styles.modalConfirmBtn} onPress={executePermanentMemoryDeletion}>
-              <Text style={styles.modalConfirmText}>🔥 영구 파기 실행</Text>
+            <Text style={[meS.halfSheetDesc, { color: t.textSecondary }]}>
+              선택한 기억들을 정말 영구 파기할까요?{'\n'}이 작업은 되돌릴 수 없습니다.
+            </Text>
+            <Pressable
+              style={[meS.halfSheetDeleteBtn, isDeleting && { opacity: 0.6 }]}
+              onPress={executePermanentMemoryDeletion}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={meS.halfSheetDeleteText}>{selectedIds.size}개 영구 파기</Text>
+              )}
             </Pressable>
-            <Pressable style={styles.modalCancelBtn} onPress={() => setShowModal(false)}>
-              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+            <Pressable
+              style={meS.halfSheetCancelBtn}
+              onPress={() => setShowModal(false)}
+              disabled={isDeleting}
+            >
+              <Text style={[meS.halfSheetCancelText, { color: t.textMuted }]}>취소</Text>
             </Pressable>
           </View>
         </View>
@@ -1131,6 +1144,90 @@ const meS = StyleSheet.create({
     color: Colors.ALERT_SIREN_RED,
     fontSize: FontSize.sm,
     lineHeight: 18,
+  },
+  // ── 스티키 푸터 ──────────────────────────────────────────────────────────
+  stickyFooterWrapper: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingBottom: TabBar.height + 16,
+  },
+  stickyFooterBar: {
+    marginHorizontal: 16,
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  stickyFooterGrad: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickyFooterText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.2,
+  },
+  // ── 하프 바텀시트 ─────────────────────────────────────────────────────────
+  halfSheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(10,13,26,0.55)',
+  },
+  halfSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.20)',
+    paddingHorizontal: Spacing.xl,
+    paddingTop: 20,
+    paddingBottom: 44,
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  halfSheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginBottom: 4,
+  },
+  halfSheetEmoji: { fontSize: 36 },
+  halfSheetTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+  },
+  halfSheetDesc: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  halfSheetDeleteBtn: {
+    width: '100%',
+    paddingVertical: 15,
+    borderRadius: Radius.lg,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  halfSheetDeleteText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+  },
+  halfSheetCancelBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    width: '100%',
+  },
+  halfSheetCancelText: {
+    fontSize: FontSize.base,
   },
 });
 
@@ -1623,9 +1720,23 @@ const pS = StyleSheet.create({
 
 // ─── Profile Header ───────────────────────────────────────────────────────────
 
+// ── 소셜 배지 정의 ──────────────────────────────────────────────────────────────
+const SOCIAL_BADGES: {
+  provider: 'GOOGLE' | 'KAKAO' | 'NAVER' | 'APPLE';
+  label: string;
+  activeBg: string;
+  activeText: string;
+}[] = [
+  { provider: 'GOOGLE', label: 'G', activeBg: '#4285F4', activeText: '#FFF' },
+  { provider: 'KAKAO', label: 'K', activeBg: '#FEE500', activeText: '#3C1E1E' },
+  { provider: 'NAVER', label: 'N', activeBg: '#03C75A', activeText: '#FFF' },
+  { provider: 'APPLE', label: '🍎', activeBg: '#1D1D1F', activeText: '#FFF' },
+];
+
 function ProfileHeader({ t }: { t: ThemeTokens }) {
-  const { myProfile, setMyProfile, subscriptionStatus } = useAppContext();
+  const { myProfile, setMyProfile, subscriptionStatus, userAccount } = useAppContext();
   const { isPremium, hasLuxuryUI } = usePremiumGate();
+  const router = useRouter();
   const displayName = myProfile?.name ?? 'Twin.me 사용자';
 
   const [isImageLoading, setIsImageLoading] = useState(false);
@@ -1756,7 +1867,9 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
                   end={{ x: 1, y: 1 }}
                   style={styles.profilePlaceholder}
                 >
-                  <Text style={styles.profilePlaceholderIcon}>👤</Text>
+                  <Text style={styles.profileInitial}>
+                    {(displayName || 'U').charAt(0).toUpperCase()}
+                  </Text>
                 </LinearGradient>
               )}
               {isUploading && (
@@ -1792,6 +1905,47 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
         <Text style={[styles.profileSub, { color: t.textSecondary }]}>
           {isPremium ? '프리미엄 플랜 구독 중 ✨' : '마이 트윈 데이터 제어 패널'}
         </Text>
+
+        {/* ── 소셜 연동 배지 행 — 원탭으로 account-link 직행 ────────────── */}
+        <Pressable
+          style={phS.socialBadgeRow}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push('/settings/account-link' as any);
+          }}
+          hitSlop={4}
+        >
+          {SOCIAL_BADGES.map(({ provider, label, activeBg, activeText }) => {
+            const linked = userAccount.linkedProviders.includes(provider);
+            return (
+              <View key={provider} style={phS.socialBadgeWrap}>
+                <View
+                  style={[
+                    phS.socialBadge,
+                    linked
+                      ? { backgroundColor: activeBg }
+                      : { backgroundColor: 'rgba(160,160,160,0.12)' },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      phS.socialBadgeLabel,
+                      { color: linked ? activeText : 'rgba(160,160,160,0.45)' },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </View>
+                {!linked && (
+                  <View style={phS.socialPlusDot}>
+                    <Text style={phS.socialPlusText}>+</Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+          <Text style={[phS.socialBadgeHint, { color: t.textMuted }]}>›</Text>
+        </Pressable>
       </View>
 
       <Modal visible={showPermModal} transparent animationType="fade">
@@ -1839,6 +1993,53 @@ const phS = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800' as const,
     letterSpacing: 0.3,
+  },
+  // ── 소셜 배지 행 ────────────────────────────────────────────────────────
+  socialBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  socialBadgeWrap: {
+    position: 'relative',
+  },
+  socialBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '800' as const,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  socialPlusDot: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: 'rgba(124,58,237,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialPlusText: {
+    fontSize: 8,
+    color: '#FFF',
+    fontWeight: '900' as const,
+    lineHeight: 11,
+    textAlign: 'center',
+  },
+  socialBadgeHint: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    marginLeft: 1,
+    opacity: 0.5,
   },
 });
 
@@ -1998,8 +2199,12 @@ const acS = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.md,
     paddingBottom: 4,
-    borderWidth: 1,
-    ...Shadows.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   header: {
     gap: 4,
@@ -2174,11 +2379,6 @@ function KakaoSyncSection({ t }: { t: ThemeTokens }) {
 
   return (
     <View style={[ksS.card, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
-      <LinearGradient
-        colors={['rgba(217,70,239,0.07)', 'rgba(124,58,237,0.04)']}
-        style={StyleSheet.absoluteFill}
-      />
-
       <View style={ksS.header}>
         <LinearGradient
           colors={['#7C3AED', '#D946EF']}
@@ -2242,9 +2442,13 @@ const ksS = StyleSheet.create({
     borderRadius: Radius.lg,
     padding: Spacing.md,
     gap: Spacing.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    ...Shadows.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   iconBadge: {
@@ -2308,8 +2512,8 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
 
   const [isLoggingOut, setIsLoggingOut]   = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [deleteStep, setDeleteStep]       = useState<null | 'step1' | 'step2'>(null);
-  const [isDeleting, setIsDeleting]       = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting]          = useState(false);
 
   const executeLogout = async () => {
     setShowLogoutConfirm(false);
@@ -2320,7 +2524,7 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
   };
 
   const handleAccountPurge = async () => {
-    setDeleteStep(null);
+    setShowDeleteModal(false);
     setIsDeleting(true);
     try {
       await requestAccountDeletionToServer();
@@ -2369,7 +2573,7 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
         onPress={() => {
           if (isLoggingOut || isDeleting) return;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          setDeleteStep('step1');
+          setShowDeleteModal(true);
         }}
         disabled={isLoggingOut || isDeleting}
       >
@@ -2379,72 +2583,61 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
       {/* ── 로그아웃 확인 커스텀 모달 ───────────────────────────────── */}
       <Modal visible={showLogoutConfirm} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: t.card }]}>
-            <Text style={styles.modalEmoji}>🔑</Text>
-            <Text style={[styles.modalTitle, { color: t.text }]}>로그아웃</Text>
+          <View style={[styles.modalBox, { backgroundColor: t.card, borderColor: 'rgba(124,58,237,0.22)' }]}>
+            <Text style={styles.modalEmoji}>🌙</Text>
+            <Text style={[styles.modalTitle, { color: t.text }]}>잠깐 나갔다 올게요</Text>
             <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
-              정말 로그아웃하시겠어요?{'\n'}연인과의 실시간 연결이 잠시 일시정지됩니다.
+              로그아웃하면 트윈이가 잠시 잠들어요.{'\n'}연인과의 실시간 연결도 일시 중지돼요. 🌙
             </Text>
             <Pressable style={ftS.logoutConfirmBtn} onPress={executeLogout}>
-              <Text style={ftS.logoutConfirmText}>로그아웃</Text>
+              <Text style={ftS.logoutConfirmText}>네, 잠깐 나갔다 올게요</Text>
             </Pressable>
             <Pressable style={styles.modalCancelBtn} onPress={() => setShowLogoutConfirm(false)}>
-              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
+              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>아니요, 계속 함께할게요</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
 
-      {/* ── 계정 삭제 1단계 모달 ─────────────────────────────────────── */}
-      <Modal visible={deleteStep === 'step1'} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: t.card, borderColor: 'rgba(255,77,77,0.30)' }]}>
-            <Text style={styles.modalEmoji}>🚨</Text>
-            <Text style={[styles.modalTitle, { color: t.text }]}>정말로 삭제하시겠어요?</Text>
-            <Text style={[styles.modalDesc, { color: t.textSecondary }]}>
-              그동안의 기록이 전부 지워집니다.
-            </Text>
-            <Pressable
-              style={ftS.step1ContinueBtn}
-              onPress={() => setDeleteStep('step2')}
-            >
-              <Text style={ftS.step1ContinueText}>이어하기 (삭제 절차 진행)</Text>
-            </Pressable>
-            <Pressable style={styles.modalCancelBtn} onPress={() => setDeleteStep(null)}>
-              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── 계정 삭제 2단계 최종 확인 모달 ─────────────────────────── */}
-      <Modal visible={deleteStep === 'step2'} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: t.card, borderColor: 'rgba(255,77,77,0.40)' }]}>
-            <Text style={styles.modalEmoji}>💀</Text>
-            <Text style={[styles.modalTitle, { color: '#FF4D4D' }]}>최종 확인</Text>
-            <View style={ftS.dataWarnBox}>
-              <Text style={[ftS.dataWarnText, { color: t.textSecondary }]}>
-                연애 DNA 일치율 로그, 커스텀 데이트 지도 핀, 주간 연애 리포트 등 앱 내 모든 아카이브 데이터가 즉시 파기되며 복구가 불가능합니다.
+      {/* ── 계정 삭제 단일 감성 모달 ──────────────────────────────────── */}
+      <Modal visible={showDeleteModal} transparent animationType="slide">
+        <View style={ftS.deleteModalOverlay}>
+          <View style={[ftS.deleteModalSheet, { backgroundColor: t.card, borderColor: 'rgba(255,77,77,0.20)' }]}>
+            <Text style={ftS.deleteModalEmoji}>💔</Text>
+            <Text style={[ftS.deleteModalTitle, { color: t.text }]}>잠깐만요 💔</Text>
+            <View style={ftS.deleteWarnBox}>
+              <Text style={[ftS.deleteWarnText, { color: t.textSecondary }]}>
+                두 분이 함께 만든 지도 핀, 주고받은 말들, 연애 DNA 기록이 전부 사라져요. 한 번 지우면 돌아올 수 없어요.
               </Text>
             </View>
+
+            {/* 이탈 억제 — 가장 눈에 띄는 프리미엄 CTA */}
+            <LinearGradient
+              colors={['#7C3AED', '#D946EF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={ftS.deleteStayBtnGrad}
+            >
+              <Pressable
+                style={ftS.deleteStayBtn}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
+                <Text style={ftS.deleteStayText}>아니요, 남아 있을게요</Text>
+              </Pressable>
+            </LinearGradient>
+
+            {/* 삭제 강행 — 톤 다운 */}
             <Pressable
-              style={ftS.finalDeleteBtn}
+              style={[ftS.deleteConfirmBtn, isDeleting && { opacity: 0.5 }]}
               onPress={handleAccountPurge}
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <ActivityIndicator size="small" color="#FFF" />
+                <ActivityIndicator size="small" color="#FF4D4D" />
               ) : (
-                <Text style={ftS.finalDeleteText}>⚠️ 확인하였으며, 계정 삭제에 동의합니다</Text>
+                <Text style={ftS.deleteConfirmText}>💀 모든 기억을 영구 삭제할게요</Text>
               )}
-            </Pressable>
-            <Pressable
-              style={styles.modalCancelBtn}
-              onPress={() => setDeleteStep(null)}
-              disabled={isDeleting}
-            >
-              <Text style={[styles.modalCancelText, { color: t.textMuted }]}>취소</Text>
             </Pressable>
           </View>
         </View>
@@ -2452,11 +2645,11 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
 
       {/* ── 로그아웃 진행 오버레이 ───────────────────────────────────── */}
       <Modal visible={isLoggingOut} transparent animationType="fade" statusBarTranslucent>
-        <View style={ftS.logoutOverlay}>
-          <View style={ftS.logoutCard}>
-            <ActivityIndicator size="large" color="#7C3AED" />
-            <Text style={ftS.logoutOverlayTitle}>잠시만요...</Text>
-            <Text style={ftS.logoutOverlayDesc}>안전하게 세션을 종료하고 있어요</Text>
+        <View style={[ftS.logoutOverlay, { backgroundColor: t.isLight ? 'rgba(255,255,255,0.88)' : 'rgba(10,13,26,0.88)' }]}>
+          <View style={[ftS.logoutCard, { backgroundColor: t.card, borderColor: t.isLight ? 'rgba(114,84,119,0.28)' : 'rgba(124,58,237,0.35)', shadowColor: t.isLight ? '#725477' : '#7C3AED' }]}>
+            <ActivityIndicator size="large" color={t.isLight ? t.secondary : '#7C3AED'} />
+            <Text style={[ftS.logoutOverlayTitle, { color: t.text }]}>잠시만요...</Text>
+            <Text style={[ftS.logoutOverlayDesc, { color: t.textSecondary }]}>안전하게 세션을 종료하고 있어요</Text>
           </View>
         </View>
       </Modal>
@@ -2530,87 +2723,104 @@ const ftS = StyleSheet.create({
     fontSize: FontSize.base,
     fontWeight: FontWeight.bold,
   },
-  // ── 1단계 이어하기 버튼 ─────────────────────────────────────────────
-  step1ContinueBtn: {
+  // ── 단일 감성 삭제 모달 ─────────────────────────────────────────────
+  deleteModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(10,13,26,0.60)',
+  },
+  deleteModalSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xl,
+    paddingBottom: 40,
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  deleteModalEmoji: { fontSize: 40, marginBottom: 4 },
+  deleteModalTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  deleteWarnBox: {
+    backgroundColor: 'rgba(255,77,77,0.06)',
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,77,77,0.22)',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  deleteWarnText: {
+    fontSize: FontSize.sm,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  // 이탈 억제 버튼 (프리미엄 그라데이션)
+  deleteStayBtnGrad: {
+    width: '100%',
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  deleteStayBtn: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteStayText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.base,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  // 삭제 강행 버튼 — 매트 다크 레드
+  deleteConfirmBtn: {
     width: '100%',
     paddingVertical: 14,
-    borderRadius: Radius.md,
-    backgroundColor: 'rgba(255,77,77,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,77,77,0.35)',
     alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(127,29,29,0.88)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(220,38,38,0.45)',
+    marginTop: 4,
   },
-  step1ContinueText: {
-    color: '#FF4D4D',
-    fontSize: FontSize.base,
-    fontWeight: FontWeight.bold,
-  },
-  // ── 2단계 데이터 경고 박스 ──────────────────────────────────────────
-  dataWarnBox: {
-    backgroundColor: 'rgba(255,77,77,0.08)',
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,77,77,0.28)',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    width: '100%',
-  },
-  dataWarnText: {
+  deleteConfirmText: {
+    color: 'rgba(255,200,200,0.92)',
     fontSize: FontSize.sm,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  // ── 2단계 최종 삭제 CTA — emphasized red blur button ────────────────
-  finalDeleteBtn: {
-    width: '100%',
-    paddingVertical: 15,
-    borderRadius: Radius.md,
-    backgroundColor: '#FF4D4D',
-    alignItems: 'center',
-    shadowColor: '#FF4D4D',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  finalDeleteText: {
-    color: '#FFF',
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
-    textAlign: 'center',
-    lineHeight: 20,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.15,
   },
   // ── 로그아웃 진행 오버레이 ───────────────────────────────────────────
   logoutOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(10,13,26,0.88)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoutCard: {
-    backgroundColor: '#1E293B',
     borderRadius: Radius.xl,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.35)',
     paddingVertical: 36,
     paddingHorizontal: 40,
     alignItems: 'center',
     gap: Spacing.md,
     minWidth: 220,
-    shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 24,
     elevation: 16,
   },
   logoutOverlayTitle: {
-    color: '#E2E8F0',
     fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.2,
   },
   logoutOverlayDesc: {
-    color: '#94A3B8',
     fontSize: FontSize.sm,
     letterSpacing: 0.1,
   },
@@ -2800,9 +3010,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profilePlaceholderIcon: {
-    fontSize: 22,
-    color: '#FFF',
+  profileInitial: {
+    fontSize: 28,
+    color: '#FFFFFF',
+    fontWeight: '900',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   profileImageOverlay: {
     position: 'absolute',
@@ -2977,25 +3192,29 @@ const styles = StyleSheet.create({
 
   dangerCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(239,68,68,0.25)',
     padding: Spacing.md,
     gap: Spacing.md,
     overflow: 'hidden',
-    ...Shadows.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   dangerHeader: { gap: Spacing.xs },
   dangerBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    backgroundColor: 'rgba(100,80,120,0.18)',
     borderRadius: Radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
+    borderColor: 'rgba(140,110,160,0.28)',
   },
   dangerBadgeText: {
-    color: Colors.ALERT_SIREN_RED,
+    color: '#A89BBE',
     fontSize: FontSize.xs,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.5,

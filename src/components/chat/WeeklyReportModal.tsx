@@ -1,6 +1,8 @@
-import React, { createElement, useEffect, useState } from 'react';
+import React, { createElement, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -8,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, {
@@ -30,6 +33,7 @@ import type {
   TopicItem,
   WeeklyReportData,
 } from '../../services/weeklyReportService';
+import { ViralShareModal } from '../share/ViralShareCard';
 
 // ── SVG helpers (web only) ────────────────────────────────────────────────────
 
@@ -646,7 +650,7 @@ function PaywallNudgeModal({
 const pwStyles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(5,3,18,0.88)',
+    backgroundColor: 'rgba(10,13,26,0.88)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
@@ -654,7 +658,7 @@ const pwStyles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    backgroundColor: 'rgba(15,10,40,0.98)',
+    backgroundColor: 'rgba(10,13,26,0.98)',
     borderRadius: 24,
     borderWidth: 1.5,
     borderColor: 'rgba(217,70,239,0.45)',
@@ -708,6 +712,19 @@ function EmptyState() {
   );
 }
 
+// ── Snap section metadata ─────────────────────────────────────────────────────
+
+const SNAP_SECTIONS = [
+  { key: 'topics',   emoji: '💬', label: '대화 주제' },
+  { key: 'moment',   emoji: '💫', label: '베스트' },
+  { key: 'date',     emoji: '📈', label: '만족도' },
+  { key: 'match',    emoji: '⚽', label: '전선' },
+  { key: 'dna',      emoji: '🧬', label: 'DNA' },
+  { key: 'comment',  emoji: '✍️', label: '한줄평' },
+] as const;
+
+const N_SNAP = SNAP_SECTIONS.length;
+
 // ── Main WeeklyReportModal ────────────────────────────────────────────────────
 
 interface WeeklyReportModalProps {
@@ -720,9 +737,33 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
   const isPremium = subscriptionStatus.isPremium;
   const r: WeeklyReportData | null = weeklyReportData;
 
+  // Snap paging
+  const { height: winH } = useWindowDimensions();
+  const [currentPage, setCurrentPage] = useState(0);
+  const [svH, setSvH] = useState(() => Math.round(winH * 0.9) - 96);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const handlePageScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (svH <= 0) return;
+    const page = Math.round(e.nativeEvent.contentOffset.y / svH);
+    const clamped = Math.max(0, Math.min(page, N_SNAP - 1));
+    if (clamped !== currentPage) {
+      setCurrentPage(clamped);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  const goToPage = (i: number) => {
+    scrollRef.current?.scrollTo({ y: i * svH, animated: true });
+    setCurrentPage(i);
+  };
+
   // Paywall state
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallDomain, setPaywallDomain] = useState<LockDomain>('match_stats');
+
+  // Viral share card state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
 
   // Animated premium unlock progress (0 = locked, 1 = unlocked)
   const unlockAnim = useSharedValue(isPremium ? 1 : 0);
@@ -805,120 +846,192 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
           </View>
         )}
 
+        {/* ── 섹션 인디케이터 ─────────────────────────────────────────────── */}
+        {r && !r.isLoading && (
+          <View style={mStyles.pageIndicatorRow}>
+            {SNAP_SECTIONS.map((sec, i) => (
+              <Pressable key={sec.key} style={mStyles.pageSegTap} onPress={() => goToPage(i)}>
+                <View style={[mStyles.pageSeg, i === currentPage && mStyles.pageSegActive]} />
+                {i === currentPage && (
+                  <Text style={mStyles.pageSegEmoji}>{sec.emoji}</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* ── 스냅 페이징 ScrollView ──────────────────────────────────────── */}
         <ScrollView
+          ref={scrollRef}
+          pagingEnabled
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={mStyles.scrollContent}
-          bounces
+          decelerationRate="fast"
+          scrollEventThrottle={16}
+          onScroll={handlePageScroll}
+          onLayout={(e) => setSvH(e.nativeEvent.layout.height)}
+          style={mStyles.snapScroll}
+          contentContainerStyle={mStyles.snapContent}
+          bounces={false}
+          nestedScrollEnabled
         >
           {(!r || r.isLoading) ? (
-            r?.isLoading ? <LoadingSkeleton /> : <EmptyState />
+            /* 로딩/빈 상태 — 단일 페이지 */
+            <View style={[mStyles.snapPage, { height: svH, alignItems: 'center', justifyContent: 'center' }]}>
+              {r?.isLoading ? <LoadingSkeleton /> : <EmptyState />}
+            </View>
           ) : (
             <>
-              {/* ── Section 1: Topics ──────────────────────────────────── */}
-              <TopicsSection
-                r={r}
-                isPremium={isPremium}
-                unlockAnim={unlockAnim}
-                onPressLocked={openPaywall}
-              />
-
-              {/* ── Section 2: Best Moment ─────────────────────────────── */}
-              <BestMomentSection
-                r={r}
-                isPremium={isPremium}
-                partnerName={partnerProfile.name}
-              />
-
-              {/* ── Section 3: Date Satisfaction (hard locked) ─────────── */}
-              <HardLockSection
-                isPremium={isPremium}
-                blur={8}
-                domain="date_satisfaction"
-                onPressLocked={openPaywall}
-                title="📈 주간 데이트 만족도 분석"
-                unlockAnim={unlockAnim}
-              >
-                <DateSatisfactionContent r={r} />
-              </HardLockSection>
-
-              {/* ── Section 4: Match Stats (hard locked) ───────────────── */}
-              <HardLockSection
-                isPremium={isPremium}
-                blur={8}
-                domain="match_stats"
-                onPressLocked={openPaywall}
-                title="⚽ 연애 전선 리포트"
-                unlockAnim={unlockAnim}
-              >
-                {r.matchStats ? (
-                  <MatchStatsContent
-                    stats={r.matchStats}
-                    myName={myProfile.name}
-                    partnerName={partnerProfile.name}
+              {/* ── Page 0: 대화 주제 ──────────────────────────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <TopicsSection
+                    r={r}
+                    isPremium={isPremium}
+                    unlockAnim={unlockAnim}
+                    onPressLocked={openPaywall}
                   />
-                ) : (
-                  <Text style={rStyles.emptyCardText}>데이터 집계 중이에요</Text>
-                )}
-              </HardLockSection>
-
-              {/* ── Section 5: DNA Audit Log (blur 12 + CTA) ───────────── */}
-              <View style={rStyles.sectionCard}>
-                <Text style={rStyles.sectionTitle}>🧬 연애 DNA 매칭률 로그</Text>
-                {!isPremium ? (
-                  <View>
-                    {/* Heavily blurred preview */}
-                    <View
-                      style={Platform.OS === 'web'
-                        ? [rStyles.auditBlurPreview, { filter: 'blur(12px)' } as object]
-                        : [rStyles.auditBlurPreview, { opacity: 0.05 }]
-                      }
-                      pointerEvents="none"
-                    >
-                      {[1,2,3,4].map((i) => (
-                        <View key={i} style={rStyles.auditFakeRow}>
-                          <View style={[rStyles.auditFakeBar, { width: `${60 + i * 10}%` as any }]} />
-                        </View>
-                      ))}
-                    </View>
-                    {/* CTA button overlay */}
-                    <TouchableOpacity
-                      style={rStyles.auditCtaBtn}
-                      onPress={() => openPaywall('audit_log')}
-                      activeOpacity={0.85}
-                    >
-                      <LinearGradient
-                        colors={['rgba(124,58,237,0.25)', 'rgba(217,70,239,0.2)']}
-                        style={StyleSheet.absoluteFill}
-                      />
-                      <Text style={rStyles.auditCtaIcon}>🔒</Text>
-                      <Text style={rStyles.auditCtaText}>이번 주 가·감산 비밀 로그 확인하기</Text>
-                    </TouchableOpacity>
+                  <View style={mStyles.snapNextHint}>
+                    <Text style={mStyles.snapNextText}>아래로 스와이프 → 다음 섹션</Text>
                   </View>
-                ) : (
-                  r.auditLogs && r.auditLogs.length > 0 ? (
-                    <AuditLogContent logs={r.auditLogs} />
-                  ) : (
-                    <Text style={rStyles.emptyCardText}>이번 주 이벤트 로그가 없어요</Text>
-                  )
-                )}
+                </ScrollView>
               </View>
 
-              {/* Analyst comment */}
-              <View style={rStyles.sectionCard}>
-                <Text style={rStyles.sectionTitle}>✍️ 트윈이의 감성 한줄평</Text>
-                <View style={rStyles.analystCard}>
-                  <Text style={rStyles.analystAvatar}>🔬</Text>
-                  <View style={rStyles.analystBubble}>
-                    <Text style={rStyles.analystText}>{r.analystComment}</Text>
+              {/* ── Page 1: Best 모먼트 ────────────────────────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <BestMomentSection
+                    r={r}
+                    isPremium={isPremium}
+                    partnerName={partnerProfile.name}
+                  />
+                </ScrollView>
+              </View>
+
+              {/* ── Page 2: 데이트 만족도 ──────────────────────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <HardLockSection
+                    isPremium={isPremium}
+                    blur={8}
+                    domain="date_satisfaction"
+                    onPressLocked={openPaywall}
+                    title="📈 주간 데이트 만족도 분석"
+                    unlockAnim={unlockAnim}
+                  >
+                    <DateSatisfactionContent r={r} />
+                  </HardLockSection>
+                </ScrollView>
+              </View>
+
+              {/* ── Page 3: 연애 전선 ──────────────────────────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <HardLockSection
+                    isPremium={isPremium}
+                    blur={8}
+                    domain="match_stats"
+                    onPressLocked={openPaywall}
+                    title="⚽ 연애 전선 리포트"
+                    unlockAnim={unlockAnim}
+                  >
+                    {r.matchStats ? (
+                      <MatchStatsContent
+                        stats={r.matchStats}
+                        myName={myProfile.name}
+                        partnerName={partnerProfile.name}
+                      />
+                    ) : (
+                      <Text style={rStyles.emptyCardText}>데이터 집계 중이에요</Text>
+                    )}
+                  </HardLockSection>
+                </ScrollView>
+              </View>
+
+              {/* ── Page 4: DNA 매칭률 로그 ────────────────────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <View style={rStyles.sectionCard}>
+                    <Text style={rStyles.sectionTitle}>🧬 연애 DNA 매칭률 로그</Text>
+                    {!isPremium ? (
+                      <View>
+                        <View
+                          style={Platform.OS === 'web'
+                            ? [rStyles.auditBlurPreview, { filter: 'blur(12px)' } as object]
+                            : [rStyles.auditBlurPreview, { opacity: 0.05 }]
+                          }
+                          pointerEvents="none"
+                        >
+                          {[1,2,3,4].map((i) => (
+                            <View key={i} style={rStyles.auditFakeRow}>
+                              <View style={[rStyles.auditFakeBar, { width: `${60 + i * 10}%` as any }]} />
+                            </View>
+                          ))}
+                        </View>
+                        <TouchableOpacity
+                          style={rStyles.auditCtaBtn}
+                          onPress={() => openPaywall('audit_log')}
+                          activeOpacity={0.85}
+                        >
+                          <LinearGradient
+                            colors={['rgba(124,58,237,0.25)', 'rgba(217,70,239,0.2)']}
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <Text style={rStyles.auditCtaIcon}>🔒</Text>
+                          <Text style={rStyles.auditCtaText}>이번 주 가·감산 비밀 로그 확인하기</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      r.auditLogs && r.auditLogs.length > 0 ? (
+                        <AuditLogContent logs={r.auditLogs} />
+                      ) : (
+                        <Text style={rStyles.emptyCardText}>이번 주 이벤트 로그가 없어요</Text>
+                      )
+                    )}
                   </View>
-                </View>
+                </ScrollView>
+              </View>
+
+              {/* ── Page 5: 트윈이 한줄평 + 공유 CTA + 닫기 ─────────────── */}
+              <View style={[mStyles.snapPage, { height: svH }]}>
+                <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
+                  <View style={rStyles.sectionCard}>
+                    <Text style={rStyles.sectionTitle}>✍️ 트윈이의 감성 한줄평</Text>
+                    <View style={rStyles.analystCard}>
+                      <Text style={rStyles.analystAvatar}>🔬</Text>
+                      <View style={rStyles.analystBubble}>
+                        <Text style={rStyles.analystText}>{r.analystComment}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {isPremium && (
+                    <TouchableOpacity
+                      style={[rStyles.shareStoryCta, { marginTop: Spacing.md }]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setShareModalVisible(true);
+                      }}
+                      activeOpacity={0.83}
+                    >
+                      <LinearGradient
+                        colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        style={rStyles.shareStoryGrad}
+                      >
+                        <Text style={rStyles.shareStoryText}>
+                          ✨ 인스타 스토리에 이주의 카드 공유하기
+                        </Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  )}
+
+                  <Pressable style={rStyles.bottomClose} onPress={onClose}>
+                    <Text style={rStyles.bottomCloseText}>리포트 닫기</Text>
+                  </Pressable>
+                </ScrollView>
               </View>
             </>
           )}
-
-          <Pressable style={rStyles.bottomClose} onPress={onClose}>
-            <Text style={rStyles.bottomCloseText}>리포트 닫기</Text>
-          </Pressable>
         </ScrollView>
       </Animated.View>
 
@@ -931,6 +1044,15 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
           onVirtualPurchase={handleVirtualPurchase}
         />
       )}
+
+      {/* Viral Share Card Modal */}
+      <ViralShareModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        reportData={r}
+        myName={myProfile.name}
+        partnerName={partnerProfile.name}
+      />
     </View>
   );
 }
@@ -999,12 +1121,12 @@ export function ReportCardBubble({ onPress }: ReportCardBubbleProps) {
 
 const mStyles = StyleSheet.create({
   root: { zIndex: 9998 },
-  overlay: { backgroundColor: 'rgba(5,3,18,0.84)' },
+  overlay: { backgroundColor: 'rgba(10,13,26,0.84)' },
   modal: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    maxHeight: '95%',
-    backgroundColor: 'rgba(12,9,30,0.98)',
+    height: '90%',
+    backgroundColor: 'rgba(10,13,26,0.98)',
     borderTopLeftRadius: Radius['2xl'],
     borderTopRightRadius: Radius['2xl'],
     borderWidth: 1,
@@ -1059,12 +1181,69 @@ const mStyles = StyleSheet.create({
     gap: Spacing.md,
     paddingTop: Spacing.sm,
   },
+
+  // ── 섹션 인디케이터 ────────────────────────────────────────────────────
+  pageIndicatorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.sm,
+    gap: 4,
+  },
+  pageSegTap: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingBottom: 2,
+  },
+  pageSeg: {
+    height: 3,
+    borderRadius: 2,
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  pageSegActive: {
+    backgroundColor: '#A78BFA',
+    shadowColor: '#A78BFA',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  pageSegEmoji: {
+    fontSize: 10,
+    textAlign: 'center',
+  },
+
+  // ── 스냅 ScrollView + 페이지 ───────────────────────────────────────────
+  snapScroll: {
+    flex: 1,
+  },
+  snapContent: {
+    flexGrow: 0,
+  },
+  snapPage: {
+    paddingHorizontal: Spacing.base,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
+    overflow: 'hidden',
+  },
+  snapNextHint: {
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  snapNextText: {
+    color: 'rgba(148,163,184,0.45)',
+    fontSize: FontSize.xs,
+    letterSpacing: 0.2,
+  },
 });
 
 const rStyles = StyleSheet.create({
   // Section card wrapper
   sectionCard: {
-    backgroundColor: 'rgba(26,18,50,0.72)',
+    backgroundColor: 'rgba(10,13,26,0.72)',
     borderRadius: Radius.xl,
     padding: Spacing.base,
     borderWidth: 1,
@@ -1085,7 +1264,7 @@ const rStyles = StyleSheet.create({
 
   // Lock overlay
   lockOverlay: {
-    backgroundColor: 'rgba(12,9,30,0.80)',
+    backgroundColor: 'rgba(10,13,26,0.80)',
     borderRadius: Radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1104,7 +1283,7 @@ const rStyles = StyleSheet.create({
   // Quest blur (free)
   questBlurWrap: { position: 'relative', borderRadius: Radius.lg, overflow: 'hidden', marginTop: 4 },
   questBlurText: { color: '#C084FC', fontSize: FontSize.xs, lineHeight: 20, padding: 12, backgroundColor: 'rgba(124,58,237,0.12)', borderRadius: Radius.lg },
-  questBlurOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(12,9,30,0.72)', borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', gap: 4, flexDirection: 'row' },
+  questBlurOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(10,13,26,0.72)', borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', gap: 4, flexDirection: 'row' },
   questBlurIcon: { fontSize: 14 },
   questBlurLabel: { color: '#7C3AED', fontSize: 11, fontWeight: FontWeight.semibold },
 
@@ -1213,6 +1392,19 @@ const rStyles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(56,189,248,0.2)',
   },
   analystText: { color: '#CBD5E1', fontSize: FontSize.sm, lineHeight: 22 },
+
+  // Viral share CTA
+  shareStoryCta: {
+    borderRadius: Radius.pill, overflow: 'hidden',
+    marginTop: Spacing.sm,
+    shadowColor: '#D946EF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  shareStoryGrad: { paddingVertical: 15, alignItems: 'center' },
+  shareStoryText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold, letterSpacing: 0.2 },
 
   // Bottom close
   bottomClose: {

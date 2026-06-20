@@ -55,11 +55,11 @@ export const LightBlends = {
 export const Colors = {
   // Background & Stage
   BG_DARK_MIDNIGHT: '#0A0D1A',
-  BG_LIGHT_SNOW: '#F8F9FA',
+  BG_LIGHT_SNOW: '#FAF8F5',
 
   // Card surfaces
   CARD_DARK_SLATE: '#1E293B',
-  CARD_LIGHT_WHITE: '#FFFFFF',
+  CARD_LIGHT_WHITE: '#FFFDF9',
 
   // Brand core gradient stops (dark/neon)
   GRADIENT_START: '#7C3AED',   // Neon Violet
@@ -190,7 +190,7 @@ export interface ThemeTokens {
 
 export const LIGHT_THEME: ThemeTokens = {
   bg: '#F9F6F7',                             // warm white — neutral base
-  card: '#FFFFFF',
+  card: '#FFFDF9',
   cardBorder: 'rgba(112,88,91,0.14)',        // LightBrandTokens.PRIMARY tint
   text: '#1E293B',
   textSecondary: '#4A3D40',                  // darkened PRIMARY
@@ -200,7 +200,7 @@ export const LIGHT_THEME: ThemeTokens = {
   chipBg: 'rgba(112,88,91,0.10)',            // PRIMARY tint
   chipBorder: 'rgba(114,84,119,0.38)',       // SECONDARY tint
   avatarInner: '#FFF5F7',
-  bubbleAI: '#FFFFFF',
+  bubbleAI: '#FFFDF9',
   bubbleAIText: '#1E293B',
   headerBg: '#F9F6F7',
   segmentTrack: '#EDE8EA',
@@ -222,7 +222,7 @@ export const LIGHT_THEME: ThemeTokens = {
   gradients: {
     primaryToSecondary: [LightBrandTokens.PRIMARY, LightBrandTokens.SECONDARY],
     bgDeep:             ['#F9F6F7', '#EEE8EF', '#E5DFF0'],
-    cardBackdrop:       ['#FFFFFF', LightBlends.BG_SURFACE],
+    cardBackdrop:       ['#FFFDF9', LightBlends.BG_SURFACE],
     helixStrandA: [
       LightBlends.SECONDARY_TERTIARY,
       LightBrandTokens.SECONDARY,
@@ -235,7 +235,7 @@ export const LIGHT_THEME: ThemeTokens = {
       LightBrandTokens.NEUTRAL,
       '#A09D9D',
     ],
-    mapBottomSheet:   ['#FFFFFF', LightBlends.BG_SURFACE, '#EDE8EF'],
+    mapBottomSheet:   ['#FFFDF9', LightBlends.BG_SURFACE, '#EDE8EF'],
     galleryCardBorder: [LightBrandTokens.SECONDARY, LightBlends.PRIMARY_SECONDARY, LightBrandTokens.PRIMARY],
     fullSpectrum: [
       LightBrandTokens.PRIMARY,
@@ -247,7 +247,7 @@ export const LIGHT_THEME: ThemeTokens = {
 };
 
 export const DARK_THEME: ThemeTokens = {
-  bg: '#1A1A2E',           // BrandTokens.TERTIARY
+  bg: '#0A0D1A',           // Colors.BG_DARK_MIDNIGHT — unified
   card: '#1E293B',
   cardBorder: 'rgba(255,255,255,0.06)',
   text: '#F1F5F9',
@@ -260,7 +260,7 @@ export const DARK_THEME: ThemeTokens = {
   avatarInner: '#1E293B',
   bubbleAI: '#1E293B',
   bubbleAIText: '#F1F5F9',
-  headerBg: '#1A1A2E',     // BrandTokens.TERTIARY
+  headerBg: '#0A0D1A',     // Colors.BG_DARK_MIDNIGHT — unified
   segmentTrack: '#1E293B',
   isLight: false,
   gradientColors: [BrandTokens.PRIMARY, BrandTokens.SECONDARY, DarkBlends.SECONDARY_TERTIARY],

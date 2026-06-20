@@ -437,7 +437,7 @@ const interceptStyles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    backgroundColor: 'rgba(18, 10, 35, 0.98)',
+    backgroundColor: 'rgba(10,13,26,0.98)',
     borderRadius: 24,
     borderWidth: 1.5,
     borderColor: 'rgba(239, 68, 68, 0.45)',
@@ -618,7 +618,7 @@ const regenOverlayStyles = StyleSheet.create({
     paddingVertical: 40,
     paddingHorizontal: 28,
     alignItems: 'center',
-    backgroundColor: 'rgba(18, 10, 35, 0.96)',
+    backgroundColor: 'rgba(10,13,26,0.96)',
     shadowColor: '#D946EF',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.28,
@@ -935,7 +935,6 @@ function GiftCatalogSheet({
 // ─── [Step #17] Updated Attachment Bar ───────────────────────────────────────
 
 interface AttachmentBarHandlers {
-  onPickImage: () => void;
   onPickVideo: () => void;
   onShareLocation: () => void;
   onOpenGiftCatalog: () => void;
@@ -943,13 +942,10 @@ interface AttachmentBarHandlers {
   isKakaoLearning: boolean;
 }
 
-function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCatalog, onKakaoLearn, isKakaoLearning }: AttachmentBarHandlers) {
+function AttachmentBar({ onPickVideo, onShareLocation, onOpenGiftCatalog, onKakaoLearn, isKakaoLearning }: AttachmentBarHandlers) {
+  const [showMore, setShowMore] = useState(false);
   return (
     <View style={styles.attachBar}>
-      <Pressable style={styles.attachBtn} onPress={onPickImage}>
-        <Text style={styles.attachBtnIcon}>📷</Text>
-        <Text style={styles.attachBtnLabel}>갤러리</Text>
-      </Pressable>
       <Pressable style={styles.attachBtn} onPress={onPickVideo}>
         <Text style={styles.attachBtnIcon}>🎬</Text>
         <Text style={styles.attachBtnLabel}>동영상</Text>
@@ -962,16 +958,23 @@ function AttachmentBar({ onPickImage, onPickVideo, onShareLocation, onOpenGiftCa
         <Text style={styles.attachBtnIcon}>🎁</Text>
         <Text style={styles.attachBtnLabel}>선물</Text>
       </Pressable>
-      <Pressable
-        style={[styles.attachBtn, isKakaoLearning && { opacity: 0.5 }]}
-        onPress={onKakaoLearn}
-        disabled={isKakaoLearning}
-      >
-        <Text style={styles.attachBtnIcon}>{isKakaoLearning ? '⏳' : '💬'}</Text>
-        <Text style={[styles.attachBtnLabel, { color: '#D946EF', fontWeight: '700' as const }]}>
-          {isKakaoLearning ? '분석중...' : '카카오톡 학습'}
-        </Text>
-      </Pressable>
+      {showMore ? (
+        <Pressable
+          style={[styles.attachBtn, isKakaoLearning && { opacity: 0.5 }]}
+          onPress={onKakaoLearn}
+          disabled={isKakaoLearning}
+        >
+          <Text style={styles.attachBtnIcon}>{isKakaoLearning ? '⏳' : '💬'}</Text>
+          <Text style={[styles.attachBtnLabel, { color: '#D946EF', fontWeight: '700' as const }]}>
+            {isKakaoLearning ? '분석중...' : '카카오 학습'}
+          </Text>
+        </Pressable>
+      ) : (
+        <Pressable style={styles.attachBtn} onPress={() => setShowMore(true)}>
+          <Text style={[styles.attachBtnIcon, { letterSpacing: -2 }]}>···</Text>
+          <Text style={styles.attachBtnLabel}>더보기</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1474,7 +1477,7 @@ const reportBannerStyles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: 'rgba(124,58,237,0.50)',
-    backgroundColor: 'rgba(10,5,28,0.88)',
+    backgroundColor: 'rgba(10,13,26,0.88)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 8,
@@ -1759,7 +1762,7 @@ function ChatRoomView({
       }
 
       if (!content || content.trim().length === 0) {
-        Alert.alert('파일 오류', '비어 있는 파일이에요. 카카오톡 .txt 파일을 선택해주세요.');
+        Alert.alert('앗, 파일이 비어 있어요 📭', '카카오톡에서 대화방을 내보내기(txt)한 파일을 선택해줘야 해요. 혹시 다른 파일을 고르신 건 아닌가요?');
         setIsKakaoLearning(false);
         return;
       }
@@ -1775,8 +1778,8 @@ function ChatRoomView({
         addMemorySentences(newRecords);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          '카카오톡 학습 완료 💬',
-          `신규 대화 ${deltaCount}건 중 ${newRecords.length}개의 감동 순간을 DNA 나선에 새겼어요! 🧬`,
+          `트윈이가 ${newRecords.length}개의 설레는 순간을 발견했어요 ✨`,
+          `${deltaCount}개의 새 대화 중에서 가장 빛나는 ${newRecords.length}개를 골라 두 분의 연애 DNA에 새겼어요. 추억 월에서 확인해 보세요! 💕`,
           [{ text: '확인', style: 'default' }],
         );
       } else if (deltaCount === 0) {
@@ -1785,7 +1788,7 @@ function ChatRoomView({
         Alert.alert('감동 순간 없음', '신규 대화에서 특별한 순간을 찾지 못했어요. 더 많은 대화를 담아보세요!', [{ text: '확인' }]);
       }
     } catch {
-      Alert.alert('오류', '파일을 분석하는 중 문제가 발생했어요. 다시 시도해주세요.');
+      Alert.alert('분석 중 안개가 꼈어요 🌫️', '잠시 후에 다시 시도해 주세요. 계속 반복되면 트윈이 팀에게 알려주세요!');
     } finally {
       setIsKakaoLearning(false);
     }
@@ -2056,7 +2059,7 @@ function ChatRoomView({
       <CrisisPulseBorder visible={crisisActive} />
 
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: t.divider, backgroundColor: t.headerBg }]}>
+      <View style={[styles.header, { borderBottomColor: 'rgba(124,58,237,0.18)', backgroundColor: t.headerBg }]}>
         <View style={styles.headerLeft}>
           <Pressable style={[styles.backBtn, { backgroundColor: t.card }]} onPress={onBack}>
             <Text style={[styles.backBtnText, { color: t.text }]}>←</Text>
@@ -2075,7 +2078,15 @@ function ChatRoomView({
         {roomType === 'partner' && (
           <Pressable
             style={[styles.attachToggleBtn, { backgroundColor: showAttachBar ? `${Colors.GRADIENT_START}22` : t.card }]}
-            onPress={() => setShowAttachBar((v) => !v)}
+            onPress={() => {
+              setShowAttachBar(false);
+              handlePickImage();
+            }}
+            onLongPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              setShowAttachBar(true);
+            }}
+            delayLongPress={400}
           >
             <Text style={[styles.attachToggleText, { color: showAttachBar ? Colors.GRADIENT_START : t.textMuted }]}>+</Text>
           </Pressable>
@@ -2104,7 +2115,6 @@ function ChatRoomView({
       {/* [Step #17] Updated Attachment bar (partner room) */}
       {roomType === 'partner' && showAttachBar && (
         <AttachmentBar
-          onPickImage={handlePickImage}
           onPickVideo={handlePickVideo}
           onShareLocation={handleShareLocation}
           onOpenGiftCatalog={() => setGiftSheetVisible(true)}
@@ -2257,7 +2267,7 @@ const kakaoLearnS = StyleSheet.create({
   },
   card: {
     width: '100%',
-    backgroundColor: 'rgba(18,6,38,0.97)',
+    backgroundColor: 'rgba(10,13,26,0.97)',
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
@@ -2443,7 +2453,7 @@ function DMListView({
 
       <View ref={refTipBox} collapsable={false} style={styles.tipBox}>
         <Text style={styles.tipText}>
-          💡 커플 방에서 날카로운 말투가 감지되면, AI 방에서 실시간 말투 가이드를 받아보세요.
+          ✨ 연인에게 더 예쁜 말을 전하고 싶을 때, 트윈이한테 먼저 써봐요.
         </Text>
       </View>
 
@@ -2539,7 +2549,7 @@ const styles = StyleSheet.create({
   tipText: { color: Colors.BADGE_AI_BLUE, fontSize: FontSize.xs, lineHeight: 18 },
 
   // Chat Room Header
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 10, elevation: 6 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, marginRight: 4 },
   backBtnText: { fontSize: FontSize.lg, lineHeight: 22 },
@@ -2598,11 +2608,11 @@ const styles = StyleSheet.create({
   tonePopupSuggText: { flex: 1, color: '#A78BFA', fontSize: FontSize.xs, lineHeight: 18 },
 
   // ── [Step #17] Media Bubble ───────────────────────────────────────────────
-  mediaBubble: { borderRadius: Radius.lg, overflow: 'hidden', maxWidth: 220 },
-  mediaBubbleUser: { alignSelf: 'flex-end' },
-  mediaBubbleAI: { alignSelf: 'flex-start' },
-  mediaImage: { width: 220, height: 165, borderRadius: Radius.lg },
-  videoPlaceholder: { width: 220, height: 140, borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(30,41,59,0.85)', overflow: 'hidden', gap: 6 },
+  mediaBubble: { borderRadius: 18, overflow: 'hidden', maxWidth: 220 },
+  mediaBubbleUser: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+  mediaBubbleAI: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+  mediaImage: { width: 220, height: 165, borderRadius: 18 },
+  videoPlaceholder: { width: 220, height: 140, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(30,41,59,0.85)', overflow: 'hidden', gap: 6 },
   videoPlaceholderIcon: { fontSize: 36 },
   videoPlaceholderText: { color: '#E2D9FF', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   uploadOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(10,13,26,0.78)', paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center', gap: 5 },
@@ -2658,9 +2668,9 @@ const styles = StyleSheet.create({
   bubbleRowAI: { justifyContent: 'flex-start', gap: 6 },
   aiBadge: { backgroundColor: Colors.BADGE_AI_BLUE, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2, marginBottom: 2, alignSelf: 'flex-end' },
   aiBadgeText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },
-  bubble: { maxWidth: 260, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 2, borderRadius: Radius.lg },
-  bubbleUser: { borderBottomRightRadius: 4 },
-  bubbleAI: { borderBottomLeftRadius: 4, borderWidth: 1 },
+  bubble: { maxWidth: 260, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
+  bubbleUser: { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 4 },
+  bubbleAI: { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 4, borderBottomRightRadius: 18, borderWidth: 1 },
   bubbleText: { fontSize: FontSize.base, lineHeight: 22 },
 
   // Nudge banner
@@ -2671,7 +2681,7 @@ const styles = StyleSheet.create({
   // Typing indicator
   typingWrapper: { paddingHorizontal: Spacing.base, marginBottom: 8, marginLeft: 30, gap: 3 },
   typingLabel: { fontSize: FontSize.xs, marginLeft: 4 },
-  typingBubble: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: Radius.lg, borderBottomLeftRadius: 4, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 4, alignSelf: 'flex-start', borderWidth: 1, minWidth: 64, justifyContent: 'center' },
+  typingBubble: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 18, borderBottomLeftRadius: 4, paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start', borderWidth: 1, minWidth: 64, justifyContent: 'center' },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.BADGE_AI_BLUE },
 
   // Input
@@ -2696,9 +2706,9 @@ const styles = StyleSheet.create({
   sheetCloseBtnText: { fontSize: FontSize.sm },
 
   // Crisis Mode
-  crisisOverlay: { backgroundColor: 'rgba(5, 3, 18, 0.97)', alignItems: 'center', justifyContent: 'center', zIndex: 999 },
+  crisisOverlay: { backgroundColor: 'rgba(10,13,26,0.97)', alignItems: 'center', justifyContent: 'center', zIndex: 999 },
   crisisWineGlow: { backgroundColor: 'rgba(190, 18, 60, 0.18)' },
-  crisisCard: { backgroundColor: 'rgba(15, 10, 40, 0.98)', borderRadius: Radius['2xl'], paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: Spacing.xl, marginHorizontal: Spacing.lg, borderWidth: 1.5, borderColor: 'rgba(190, 18, 60, 0.5)', width: '90%', maxHeight: '86%', ...Shadows.card },
+  crisisCard: { backgroundColor: 'rgba(10,13,26,0.98)', borderRadius: Radius['2xl'], paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: Spacing.xl, marginHorizontal: Spacing.lg, borderWidth: 1.5, borderColor: 'rgba(190, 18, 60, 0.5)', width: '90%', maxHeight: '86%', ...Shadows.card },
   crisisWineLine: { height: 3, backgroundColor: '#BE123C', borderRadius: 2, marginBottom: Spacing.lg, opacity: 0.85 },
   crisisTitleText: { color: '#F1F5F9', fontSize: FontSize.md + 1, fontWeight: FontWeight.extrabold, textAlign: 'center', letterSpacing: 0.4, lineHeight: 30, marginBottom: Spacing.sm },
   crisisDivider: { height: 1, backgroundColor: 'rgba(190, 18, 60, 0.28)', marginVertical: Spacing.md },

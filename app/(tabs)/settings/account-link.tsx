@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext, type LinkedProvider } from '../../../src/context/AppContext';
-import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../../src/styles/theme';
+import { FontSize, FontWeight, Radius, Spacing, type ThemeTokens } from '../../../src/styles/theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -71,7 +71,7 @@ const PROVIDERS: ProviderConfig[] = [
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
-function SyncToast({ visible }: { visible: boolean }) {
+function SyncToast({ visible, t }: { visible: boolean; t: ThemeTokens }) {
   const opacity = useRef(new RNAnimated.Value(0)).current;
   const translateY = useRef(new RNAnimated.Value(20)).current;
 
@@ -90,11 +90,11 @@ function SyncToast({ visible }: { visible: boolean }) {
   return (
     <RNAnimated.View style={[s.toast, { opacity, transform: [{ translateY }] }]}>
       <LinearGradient
-        colors={['rgba(30,20,60,0.97)', 'rgba(20,12,45,0.97)']}
-        style={s.toastInner}
+        colors={t.isLight ? ['rgba(255,255,255,0.97)', 'rgba(245,241,248,0.97)'] : ['rgba(30,20,60,0.97)', 'rgba(20,12,45,0.97)']}
+        style={[s.toastInner, { borderColor: t.isLight ? 'rgba(114,84,119,0.30)' : 'rgba(167,139,250,0.3)' }]}
       >
         <Text style={s.toastIcon}>✓</Text>
-        <Text style={s.toastText}>
+        <Text style={[s.toastText, { color: t.isLight ? t.text : '#E9E3FF' }]}>
           지금까지의 연애 DNA 데이터가 안전하게 연동되었습니다!
         </Text>
       </LinearGradient>
@@ -182,7 +182,8 @@ function ProviderButton({
 
 export default function AccountLinkScreen() {
   const router = useRouter();
-  const { userAccount, linkSocialAccount } = useAppContext();
+  const { userAccount, linkSocialAccount, themeTokens } = useAppContext();
+  const t = themeTokens;
 
   const [loadingProvider, setLoadingProvider] = useState<LinkedProvider | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
@@ -210,13 +211,13 @@ export default function AccountLinkScreen() {
   const linkedCount = userAccount.linkedProviders.length;
 
   return (
-    <SafeAreaView style={s.root} edges={['top', 'bottom']}>
+    <SafeAreaView style={[s.root, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { borderBottomColor: t.cardBorder }]}>
         <Pressable style={s.backBtn} onPress={() => router.back()}>
-          <Text style={s.backIcon}>←</Text>
+          <Text style={[s.backIcon, { color: t.isLight ? t.secondary : '#A78BFA' }]}>←</Text>
         </Pressable>
-        <Text style={s.headerTitle}>소셜 계정 연동</Text>
+        <Text style={[s.headerTitle, { color: t.text }]}>소셜 계정 연동</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -226,23 +227,23 @@ export default function AccountLinkScreen() {
       >
         {/* Hero glass card */}
         <LinearGradient
-          colors={['rgba(120,80,220,0.18)', 'rgba(60,30,120,0.10)']}
-          style={s.heroCard}
+          colors={t.isLight ? ['rgba(114,84,119,0.10)', 'rgba(83,85,170,0.06)'] : ['rgba(120,80,220,0.18)', 'rgba(60,30,120,0.10)']}
+          style={[s.heroCard, { borderColor: t.isLight ? 'rgba(114,84,119,0.22)' : 'rgba(167,139,250,0.25)' }]}
         >
           <View style={s.heroIconWrap}>
-            <LinearGradient colors={['#A855F7', '#7C3AED']} style={s.heroIconGrad}>
+            <LinearGradient colors={t.isLight ? [t.secondary, t.tertiary] : ['#A855F7', '#7C3AED']} style={s.heroIconGrad}>
               <Text style={s.heroIcon}>🔗</Text>
             </LinearGradient>
           </View>
-          <Text style={s.heroTitle}>데이터 보존 & 계정 연동</Text>
-          <Text style={s.heroDesc}>
+          <Text style={[s.heroTitle, { color: t.text }]}>데이터 보존 & 계정 연동</Text>
+          <Text style={[s.heroDesc, { color: t.textSecondary }]}>
             무료 게스트 상태에서 쌓아온 연애 DNA 점수,{'\n'}
             24개 지표, 데이트 코스 히스토리를{'\n'}
             소셜 계정에 안전하게 묶어두세요.
           </Text>
           {linkedCount > 0 && (
-            <View style={s.linkedCountBadge}>
-              <Text style={s.linkedCountText}>
+            <View style={[s.linkedCountBadge, { backgroundColor: t.chipBg, borderColor: t.chipBorder }]}>
+              <Text style={[s.linkedCountText, { color: t.isLight ? t.secondary : '#C4B5FD' }]}>
                 {linkedCount}개 계정 연동됨
               </Text>
             </View>
@@ -251,7 +252,7 @@ export default function AccountLinkScreen() {
 
         {/* Provider list */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>연동 가능한 계정</Text>
+          <Text style={[s.sectionTitle, { color: t.textMuted }]}>연동 가능한 계정</Text>
           <View style={s.providerList}>
             {PROVIDERS.map((config) => {
               const isLinked = userAccount.linkedProviders.includes(config.id);
@@ -270,26 +271,26 @@ export default function AccountLinkScreen() {
         </View>
 
         {/* Data migration info */}
-        <View style={s.infoCard}>
-          <Text style={s.infoTitle}>연동 시 동기화되는 데이터</Text>
+        <View style={[s.infoCard, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+          <Text style={[s.infoTitle, { color: t.textMuted }]}>연동 시 동기화되는 데이터</Text>
           {[
             '💜 연애 DNA 일치율 점수',
             '📊 24개 마이크로 이벤트 로그',
             '📍 멀티 레이어 데이트 지도 코스',
             '📋 주간 감정 리포트',
           ].map((item) => (
-            <Text key={item} style={s.infoItem}>
+            <Text key={item} style={[s.infoItem, { color: t.textSecondary }]}>
               {item}
             </Text>
           ))}
-          <Text style={s.infoFooter}>
+          <Text style={[s.infoFooter, { color: t.textMuted }]}>
             연동 후에도 기기 내 로컬 데이터는 유지됩니다.
           </Text>
         </View>
       </ScrollView>
 
       {/* Toast */}
-      <SyncToast visible={toastVisible} />
+      <SyncToast visible={toastVisible} t={t} />
     </SafeAreaView>
   );
 }
@@ -299,7 +300,6 @@ export default function AccountLinkScreen() {
 const s = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.BG_DARK_MIDNIGHT,
   },
   header: {
     flexDirection: 'row',
@@ -308,7 +308,6 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   backBtn: {
     width: 40,
@@ -317,11 +316,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   backIcon: {
-    color: '#A78BFA',
     fontSize: 22,
   },
   headerTitle: {
-    color: '#F1F0FF',
     fontSize: FontSize.md,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.3,
@@ -336,7 +333,6 @@ const s = StyleSheet.create({
     borderRadius: Radius.xl,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.25)',
     alignItems: 'center',
     gap: 10,
   },
@@ -359,29 +355,24 @@ const s = StyleSheet.create({
     fontSize: 28,
   },
   heroTitle: {
-    color: '#F1F0FF',
     fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.2,
     textAlign: 'center',
   },
   heroDesc: {
-    color: 'rgba(200,190,255,0.75)',
     fontSize: FontSize.sm,
     lineHeight: 22,
     textAlign: 'center',
   },
   linkedCountBadge: {
     marginTop: 4,
-    backgroundColor: 'rgba(167,139,250,0.2)',
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.4)',
   },
   linkedCountText: {
-    color: '#C4B5FD',
     fontSize: FontSize.xs,
     fontWeight: FontWeight.semibold,
   },
@@ -389,7 +380,6 @@ const s = StyleSheet.create({
     gap: 12,
   },
   sectionTitle: {
-    color: 'rgba(200,190,255,0.5)',
     fontSize: FontSize.xs,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.8,
@@ -464,15 +454,12 @@ const s = StyleSheet.create({
     fontWeight: FontWeight.medium,
   },
   infoCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
     padding: Spacing.md,
     gap: 8,
   },
   infoTitle: {
-    color: 'rgba(200,190,255,0.6)',
     fontSize: FontSize.xs,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.6,
@@ -480,12 +467,10 @@ const s = StyleSheet.create({
     marginBottom: 2,
   },
   infoItem: {
-    color: 'rgba(220,210,255,0.75)',
     fontSize: FontSize.sm,
     lineHeight: 22,
   },
   infoFooter: {
-    color: 'rgba(180,170,220,0.45)',
     fontSize: 11,
     marginTop: 4,
     lineHeight: 17,
@@ -511,7 +496,6 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     gap: 10,
     borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.3)',
     borderRadius: Radius.lg,
   },
   toastIcon: {
@@ -521,7 +505,6 @@ const s = StyleSheet.create({
   },
   toastText: {
     flex: 1,
-    color: '#E9E3FF',
     fontSize: FontSize.sm,
     lineHeight: 20,
     fontWeight: FontWeight.medium,

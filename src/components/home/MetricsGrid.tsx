@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
   // Inner card: overflow hidden to clip shimmer line & gradient bars
   card: {
     borderRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     padding: Spacing.md,
     gap: Spacing.sm,

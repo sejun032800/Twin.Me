@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -158,6 +159,12 @@ export default function SecurityScreen() {
   const [showDeactPwd, setShowDeactPwd] = useState(false);
   const [is2FABusy, setIs2FABusy] = useState(false);
   const [twoFAError, setTwoFAError] = useState('');
+  const [showExitDefense, setShowExitDefense] = useState(false);
+
+  // AppState refs — preserve setup state across background/foreground transitions
+  const appStateRef = useRef(AppState.currentState);
+  const showSetupRef = useRef(false);
+  const setupPhaseRef = useRef<SetupPhase>('qr');
 
   // Animations
   const shieldPulse = useSharedValue(0);
@@ -173,6 +180,23 @@ export default function SecurityScreen() {
       ),
       -1,
     );
+  }, []);
+
+  // Keep refs in sync for stale-closure-free AppState handler
+  useEffect(() => { showSetupRef.current = showSetup; }, [showSetup]);
+  useEffect(() => { setupPhaseRef.current = setupPhase; }, [setupPhase]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+      // Foreground 복귀 시 setup이 진행 중이었다면 모달·페이즈 상태 복원
+      if (prev !== 'active' && nextState === 'active' && showSetupRef.current) {
+        setShowSetup(true);
+        setSetupPhase(setupPhaseRef.current);
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   const shieldGlowStyle = useAnimatedStyle(() => ({
@@ -491,7 +515,7 @@ export default function SecurityScreen() {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
         >
-          <Text style={s.snackText}>비밀번호가 안전하게 변경되었습니다 🔑</Text>
+          <Text style={s.snackText}>새 비밀번호로 바꿨어요 🔒 아무도 모르는 우리만의 자물쇠예요</Text>
         </LinearGradient>
       </Animated.View>
 
@@ -508,7 +532,18 @@ export default function SecurityScreen() {
             style={{ width: '100%' }}
           >
             <View style={[s.sheet, { backgroundColor: t.card }]}>
-              <View style={[s.sheetHandle, { backgroundColor: t.textMuted }]} />
+              {/* Handle row — X 버튼 포함 (backup 페이즈는 X 없음) */}
+              <View style={s.sheetTopRow}>
+                <View style={{ width: 28 }} />
+                <View style={[s.sheetHandle, { backgroundColor: t.textMuted }]} />
+                <View style={{ width: 28, alignItems: 'flex-end' }}>
+                  {setupPhase !== 'backup' && (
+                    <Pressable onPress={() => setShowExitDefense(true)} hitSlop={12}>
+                      <Text style={[s.sheetCloseX, { color: t.textMuted }]}>✕</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
 
               {/* Phase 1: QR + Secret Key */}
               {setupPhase === 'qr' && (
@@ -533,6 +568,11 @@ export default function SecurityScreen() {
                     </View>
                   )}
 
+                  {/* QR 스캔 후 복귀 안내 — 항상 노출 */}
+                  <Text style={[s.qrReturnHint, { color: VIOLET }]}>
+                    인증 앱에서 이 QR을 스캔하고 다시 여기로 돌아와 주세요 ↩
+                  </Text>
+
                   <Text style={[s.fieldLabel, { color: t.textSecondary }]}>수동 입력 비밀키</Text>
                   <View style={[s.secretBox, { backgroundColor: t.inputBg }]}>
                     <Text style={[s.secretKey, { color: VIOLET }]} selectable>
@@ -551,7 +591,7 @@ export default function SecurityScreen() {
                     </LinearGradient>
                   </Pressable>
                   <Pressable
-                    onPress={() => setShowSetup(false)}
+                    onPress={() => setShowExitDefense(true)}
                     style={s.textLinkBtn}
                   >
                     <Text style={[s.textLink, { color: t.textMuted }]}>나중에 설정하기</Text>
@@ -637,6 +677,45 @@ export default function SecurityScreen() {
             </View>
           </KeyboardAvoidingView>
         </Pressable>
+      </Modal>
+
+      {/* ── Exit Defense Modal ────────────────────────────────────────────────── */}
+      <Modal visible={showExitDefense} transparent animationType="fade" statusBarTranslucent>
+        <View style={s.exitDefenseOverlay}>
+          <View style={[s.exitDefenseBox, { backgroundColor: t.card }]}>
+            <Text style={[s.exitDefenseTitle, { color: t.text }]}>
+              보안 인증 설정을 여기서 중단할까요?
+            </Text>
+            <Text style={[s.exitDefenseDesc, { color: t.textSecondary }]}>
+              지금 나가셔도 언제든 다시 시작할 수 있어요.
+            </Text>
+            <Pressable
+              style={s.exitDefenseContinueWrap}
+              onPress={() => setShowExitDefense(false)}
+            >
+              <LinearGradient
+                colors={['#7C3AED', '#D946EF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={s.exitDefenseContinueGrad}
+              >
+                <Text style={s.exitDefenseContinueText}>계속 설정할래요</Text>
+              </LinearGradient>
+            </Pressable>
+            <Pressable
+              style={s.exitDefenseLeaveBtn}
+              onPress={() => {
+                setShowExitDefense(false);
+                setShowSetup(false);
+                setSetupPhase('qr');
+                setOtpValue('');
+                setTwoFAError('');
+              }}
+            >
+              <Text style={[s.exitDefenseLeaveText, { color: t.textMuted }]}>잠시 접어두기</Text>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* ── Deactivate 2FA Modal ──────────────────────────────────────────────── */}
@@ -890,6 +969,7 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
+    textAlign: 'center',
   },
 
   // Modal
@@ -1014,4 +1094,78 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   halfBtnText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+
+  // ── Sheet top row (handle + X) ─────────────────────────────────────────
+  sheetTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+  },
+  sheetCloseX: {
+    fontSize: 17,
+    fontWeight: FontWeight.bold,
+    lineHeight: 22,
+  },
+
+  // ── QR return hint ─────────────────────────────────────────────────────
+  qrReturnHint: {
+    fontSize: FontSize.xs,
+    textAlign: 'center',
+    letterSpacing: 0.1,
+    opacity: 0.8,
+    marginVertical: Spacing.xs,
+  },
+
+  // ── Exit defense modal ─────────────────────────────────────────────────
+  exitDefenseOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(10,13,26,0.65)',
+    padding: Spacing.xl,
+  },
+  exitDefenseBox: {
+    width: '100%',
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(124,58,237,0.20)',
+  },
+  exitDefenseTitle: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  exitDefenseDesc: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  exitDefenseContinueWrap: {
+    width: '100%',
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    marginTop: Spacing.sm,
+  },
+  exitDefenseContinueGrad: {
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  exitDefenseContinueText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+  },
+  exitDefenseLeaveBtn: {
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  exitDefenseLeaveText: {
+    fontSize: FontSize.base,
+  },
 });

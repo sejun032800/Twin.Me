@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: Spacing.base,
     borderRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'visible',
     padding: Spacing.base,
     gap: Spacing.md,

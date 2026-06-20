@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -41,6 +42,10 @@ import { requestMuseCourse } from '../../src/services/aiMuseService';
 import { fetchCurrentWeather } from '../../src/services/weatherService';
 import type { WeatherData } from '../../src/services/weatherService';
 import { DateCourse, MapLayer, RecommendedPlace, useAppContext } from '../../src/context/AppContext';
+import { authenticateSecretLayer } from '../../src/utils/authEngine';
+import { WebAuthModal } from '../../src/components/modals/WebAuthModal';
+import { CoursePlanner } from '../../src/components/maps/CoursePlanner';
+import type { OptimizedCourse } from '../../src/utils/courseOptimizer';
 import { HistoryProvider, useHistoryContext } from '../../src/context/HistoryContext';
 import { usePhotoMetadata } from '../../src/hooks/usePhotoMetadata';
 import { useMemoryWall, MemoryNode } from '../../src/hooks/useMemoryWall';
@@ -2329,9 +2334,11 @@ const locPermS = StyleSheet.create({
 function LayerControlPanel({
   visible,
   onClose,
+  t,
 }: {
   visible: boolean;
   onClose: () => void;
+  t: ThemeTokens;
 }) {
   const {
     dateCourses,
@@ -2350,6 +2357,83 @@ function LayerControlPanel({
   const [renameText, setRenameText]   = useState('');
   const [newName, setNewName]         = useState('');
   const [showNewInput, setShowNewInput] = useState(false);
+
+  // ── FUN-HIS-006: Secret layer auth state ────────────────────────────────────
+  const [secretAuthPending, setSecretAuthPending] = useState(false);
+  const [webAuthVisible, setWebAuthVisible]       = useState(false);
+  const [snackbarMsg, setSnackbarMsg]             = useState('');
+
+  // Lock icon animation: 0 = locked, 1 = unlocked
+  const lockRotate  = useSharedValue(0);
+  const lockColor   = useSharedValue(0); // 0=red,1=green
+  const snackbarY   = useSharedValue(80);
+  const snackbarOp  = useSharedValue(0);
+
+  const isSecretUnlocked = layerVisibility['secret'] !== false;
+
+  // Sync lock anim with current visibility
+  useEffect(() => {
+    lockRotate.value = withSpring(isSecretUnlocked ? -30 : 0, { damping: 14, stiffness: 180 });
+    lockColor.value  = withTiming(isSecretUnlocked ? 1 : 0, { duration: 300 });
+  }, [isSecretUnlocked, lockRotate, lockColor]);
+
+  const lockIconStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${lockRotate.value}deg` }],
+    opacity: interpolate(lockColor.value, [0, 1], [0.7, 1]),
+  }));
+
+  const snackbarStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: snackbarY.value }],
+    opacity: snackbarOp.value,
+  }));
+
+  const showSnackbar = (msg: string) => {
+    setSnackbarMsg(msg);
+    snackbarY.value  = withSpring(0, { damping: 16, stiffness: 200 });
+    snackbarOp.value = withTiming(1, { duration: 180 });
+    setTimeout(() => {
+      snackbarY.value  = withTiming(80, { duration: 260 });
+      snackbarOp.value = withTiming(0, { duration: 220 });
+    }, 3000);
+  };
+
+  // Called when user taps secret layer eye/toggle
+  const handleSecretToggle = async () => {
+    if (secretAuthPending) return;
+    setSecretAuthPending(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    const result = await authenticateSecretLayer();
+
+    if (result.type === 'web_fallback') {
+      setSecretAuthPending(false);
+      setWebAuthVisible(true);
+      return;
+    }
+
+    setSecretAuthPending(false);
+
+    if (result.type === 'success') {
+      toggleLayerVisible('secret');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (result.type !== 'cancelled') {
+      showSnackbar('인증에 실패하여 시크릿 계획을 불러오지 못했습니다.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  const handleWebAuthSuccess = () => {
+    setWebAuthVisible(false);
+    toggleLayerVisible('secret');
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleWebAuthCancel = () => {
+    setWebAuthVisible(false);
+    showSnackbar('인증에 실패하여 시크릿 계획을 불러오지 못했습니다.');
+  };
+
+  const lcpS = useMemo(() => makeLcpStyles(t), [t.isLight]);
 
   const slideY = useSharedValue(SH);
 
@@ -2406,7 +2490,7 @@ function LayerControlPanel({
 
       <Animated.View style={[lcpS.sheet, panelStyle]}>
         <LinearGradient
-          colors={['rgba(12,16,30,0.99)', 'rgba(10,13,26,1)']}
+          colors={t.isLight ? ['rgba(255,255,255,0.99)', 'rgba(248,246,249,1)'] : ['rgba(12,16,30,0.99)', 'rgba(10,13,26,1)']}
           style={lcpS.inner}
         >
           <View style={lcpS.handle} />
@@ -2586,15 +2670,19 @@ function LayerControlPanel({
             <View style={lcpS.sectionHeader}>
               <Text style={lcpS.sectionIcon}>🤫</Text>
               <Text style={lcpS.sectionTitle}>나만 보기 레이어</Text>
+              {/* Animated lock icon */}
+              <Animated.Text style={[lcpS.lockIconAnim, lockIconStyle]}>
+                {isSecretUnlocked ? '🔓' : '🔒'}
+              </Animated.Text>
               <View style={lcpS.localBadge}>
                 <Text style={lcpS.localBadgeTxt}>로컬 전용</Text>
               </View>
             </View>
 
-            {/* Secret card — midnight purple border */}
+            {/* Secret card — biometric-guarded */}
             <View style={lcpS.secretCard}>
               <LinearGradient
-                colors={['rgba(60,4,72,0.28)', 'rgba(76,29,149,0.22)']}
+                colors={t.isLight ? ['rgba(114,84,119,0.09)', 'rgba(83,85,170,0.07)'] : ['rgba(60,4,72,0.28)', 'rgba(76,29,149,0.22)']}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                 style={lcpS.secretGrad}
               >
@@ -2605,17 +2693,23 @@ function LayerControlPanel({
                     {secretCourses.length}개 코스 · 연인에게 비공개
                   </Text>
                 </View>
+                {/* Eye toggle — intercepted by auth */}
                 <Pressable
-                  onPress={() => toggleLayerVisible('secret')}
+                  onPress={handleSecretToggle}
                   style={lcpS.eyeBtn}
                   hitSlop={8}
+                  disabled={secretAuthPending}
                 >
-                  <Text style={[
-                    lcpS.eyeEmoji,
-                    layerVisibility['secret'] === false && lcpS.eyeOff,
-                  ]}>
-                    {layerVisibility['secret'] !== false ? '👁️' : '👁️‍🗨️'}
-                  </Text>
+                  {secretAuthPending ? (
+                    <ActivityIndicator size="small" color="#D946EF" />
+                  ) : (
+                    <Text style={[
+                      lcpS.eyeEmoji,
+                      !isSecretUnlocked && lcpS.eyeOff,
+                    ]}>
+                      {isSecretUnlocked ? '👁️' : '👁️‍🗨️'}
+                    </Text>
+                  )}
                 </Pressable>
               </LinearGradient>
             </View>
@@ -2630,14 +2724,35 @@ function LayerControlPanel({
           </ScrollView>
         </LinearGradient>
       </Animated.View>
+
+      {/* ── Error snackbar ───────────────────────────────────────────────── */}
+      {snackbarMsg !== '' && (
+        <Animated.View style={[lcpS.snackbar, snackbarStyle]} pointerEvents="none">
+          <LinearGradient
+            colors={['rgba(239,68,68,0.92)', 'rgba(185,28,28,0.92)']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <Text style={lcpS.snackbarText}>🚨 {snackbarMsg}</Text>
+        </Animated.View>
+      )}
+
+      {/* ── Web PIN fallback modal ───────────────────────────────────────── */}
+      <WebAuthModal
+        visible={webAuthVisible}
+        onSuccess={handleWebAuthSuccess}
+        onCancel={handleWebAuthCancel}
+      />
     </Modal>
   );
 }
 
-const lcpS = StyleSheet.create({
+function makeLcpStyles(t: ThemeTokens) {
+  const L = t.isLight;
+  return StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.58)',
+    backgroundColor: L ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.58)',
   },
   sheet: {
     position: 'absolute',
@@ -2650,7 +2765,7 @@ const lcpS = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(124,58,237,0.42)',
+    borderColor: L ? 'rgba(112,88,91,0.28)' : 'rgba(124,58,237,0.42)',
   },
   inner: {
     flex: 1,
@@ -2662,7 +2777,7 @@ const lcpS = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(148,163,184,0.28)',
+    backgroundColor: L ? 'rgba(112,88,91,0.25)' : 'rgba(148,163,184,0.28)',
     alignSelf: 'center',
     marginBottom: Spacing.lg,
   },
@@ -2674,14 +2789,14 @@ const lcpS = StyleSheet.create({
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerHamburger: {
-    color: '#C084FC',
+    color: L ? '#725477' : '#C084FC',
     fontSize: 24,
     fontWeight: '800' as const,
     lineHeight: 26,
   },
-  headerTitle: { color: '#F1F5F9', fontSize: FontSize.xl, fontWeight: FontWeight.bold },
+  headerTitle: { color: t.text, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
   closeBtn: { padding: 6 },
-  closeTxt: { color: '#64748B', fontSize: 18 },
+  closeTxt: { color: t.textMuted, fontSize: 18 },
   // Section headers
   sectionHeader: {
     flexDirection: 'row',
@@ -2690,28 +2805,28 @@ const lcpS = StyleSheet.create({
     marginBottom: 10,
   },
   sectionIcon: { fontSize: 16 },
-  sectionTitle: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.bold, flex: 1 },
+  sectionTitle: { color: t.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold, flex: 1 },
   autoBadge: {
-    backgroundColor: 'rgba(124,58,237,0.18)',
+    backgroundColor: L ? 'rgba(114,84,119,0.12)' : 'rgba(124,58,237,0.18)',
     borderRadius: Radius.pill,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.35)',
+    borderColor: L ? 'rgba(114,84,119,0.35)' : 'rgba(124,58,237,0.35)',
   },
-  autoBadgeTxt: { color: '#C084FC', fontSize: 10, fontWeight: FontWeight.bold },
+  autoBadgeTxt: { color: L ? '#725477' : '#C084FC', fontSize: 10, fontWeight: FontWeight.bold },
   localBadge: {
-    backgroundColor: 'rgba(74,4,78,0.28)',
+    backgroundColor: L ? 'rgba(83,85,170,0.12)' : 'rgba(74,4,78,0.28)',
     borderRadius: Radius.pill,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.55)',
+    borderColor: L ? 'rgba(83,85,170,0.38)' : 'rgba(124,58,237,0.55)',
   },
-  localBadgeTxt: { color: '#A78BFA', fontSize: 10, fontWeight: FontWeight.bold },
+  localBadgeTxt: { color: L ? '#5355AA' : '#A78BFA', fontSize: 10, fontWeight: FontWeight.bold },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(124,58,237,0.2)',
+    backgroundColor: L ? t.divider : 'rgba(124,58,237,0.2)',
     marginVertical: Spacing.lg,
   },
   // Common layer row
@@ -2719,21 +2834,21 @@ const lcpS = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(30,41,59,0.55)',
+    backgroundColor: L ? 'rgba(255,255,255,0.85)' : 'rgba(30,41,59,0.55)',
     borderRadius: Radius.lg,
     padding: Spacing.md,
     marginBottom: Spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(100,116,139,0.18)',
+    borderColor: L ? 'rgba(112,88,91,0.15)' : 'rgba(100,116,139,0.18)',
   },
   lockEmoji: { fontSize: 14 },
-  layerName: { color: '#F1F5F9', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  layerMeta: { color: '#64748B', fontSize: 11, marginTop: 2 },
+  layerName: { color: t.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  layerMeta: { color: t.textMuted, fontSize: 11, marginTop: 2 },
   eyeBtn: { padding: 4 },
   eyeEmoji: { fontSize: 20 },
   eyeOff: { opacity: 0.28 },
   emptyBox: { alignItems: 'center', paddingVertical: Spacing.lg },
-  emptyTxt: { color: '#475569', fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18 },
+  emptyTxt: { color: t.textMuted, fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18 },
   // Plan layer add
   addLayerBtn: { borderRadius: Radius.pill, overflow: 'hidden' },
   addLayerGrad: { paddingHorizontal: 12, paddingVertical: 5 },
@@ -2746,14 +2861,14 @@ const lcpS = StyleSheet.create({
   },
   newLayerInput: {
     flex: 1,
-    backgroundColor: 'rgba(30,41,59,0.85)',
+    backgroundColor: L ? 'rgba(244,240,241,0.9)' : 'rgba(30,41,59,0.85)',
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: 9,
-    color: '#F1F5F9',
+    color: t.text,
     fontSize: FontSize.sm,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.45)',
+    borderColor: L ? 'rgba(114,84,119,0.35)' : 'rgba(124,58,237,0.45)',
   },
   confirmBtn: {
     width: 36,
@@ -2772,45 +2887,45 @@ const lcpS = StyleSheet.create({
     borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(100,116,139,0.12)',
+    backgroundColor: L ? 'rgba(112,88,91,0.10)' : 'rgba(100,116,139,0.12)',
   },
-  cancelTxt: { color: '#64748B', fontSize: 16 },
+  cancelTxt: { color: t.textMuted, fontSize: 16 },
   // Plan layer row
   planRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(30,41,59,0.55)',
+    backgroundColor: L ? 'rgba(255,255,255,0.85)' : 'rgba(30,41,59,0.55)',
     borderRadius: Radius.lg,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.18)',
+    borderColor: L ? 'rgba(114,84,119,0.15)' : 'rgba(124,58,237,0.18)',
   },
   renameInput: {
     flex: 1,
-    backgroundColor: 'rgba(30,41,59,0.85)',
+    backgroundColor: L ? 'rgba(244,240,241,0.9)' : 'rgba(30,41,59,0.85)',
     borderRadius: Radius.sm,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    color: '#F1F5F9',
+    color: t.text,
     fontSize: FontSize.sm,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.5)',
+    borderColor: L ? 'rgba(114,84,119,0.35)' : 'rgba(124,58,237,0.5)',
   },
   iconBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  iconBtnTxt: { color: '#94A3B8', fontSize: 15 },
+  iconBtnTxt: { color: t.textSecondary, fontSize: 15 },
   // Order buttons
   orderRow: { flexDirection: 'row', gap: 6, paddingLeft: Spacing.md, marginTop: 5 },
   orderBtn: {
-    backgroundColor: 'rgba(30,41,59,0.5)',
+    backgroundColor: L ? 'rgba(240,236,241,0.85)' : 'rgba(30,41,59,0.5)',
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(100,116,139,0.2)',
+    borderColor: L ? 'rgba(112,88,91,0.15)' : 'rgba(100,116,139,0.2)',
   },
   orderBtnOff: { opacity: 0.22 },
-  orderBtnTxt: { color: '#94A3B8', fontSize: 10, fontWeight: FontWeight.bold },
+  orderBtnTxt: { color: t.textSecondary, fontSize: 10, fontWeight: FontWeight.bold },
   // Secret layer card
   secretCard: {
     borderRadius: Radius.lg,
@@ -2832,14 +2947,37 @@ const lcpS = StyleSheet.create({
   secretEmoji: { fontSize: 22 },
   secretNote: {
     marginTop: 10,
-    backgroundColor: 'rgba(124,58,237,0.1)',
+    backgroundColor: L ? 'rgba(83,85,170,0.07)' : 'rgba(124,58,237,0.1)',
     borderRadius: Radius.md,
     padding: Spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.25)',
+    borderColor: L ? 'rgba(83,85,170,0.22)' : 'rgba(124,58,237,0.25)',
   },
-  secretNoteTxt: { color: '#8B7CB3', fontSize: 11, lineHeight: 16 },
-});
+  secretNoteTxt: { color: L ? '#5355AA' : '#8B7CB3', fontSize: 11, lineHeight: 16 },
+
+  // Auth lock icon
+  lockIconAnim: { fontSize: 18, marginLeft: 4 },
+
+  // Error snackbar
+  snackbar: {
+    position: 'absolute',
+    bottom: 24, left: 16, right: 16,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    paddingVertical: 12, paddingHorizontal: 16,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 18,
+    zIndex: 1000,
+  },
+  snackbarText: {
+    color: '#fff', fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold, lineHeight: 20,
+  },
+  });
+}
 
 // ─── DateMapView ──────────────────────────────────────────────────────────────
 
@@ -2886,6 +3024,10 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   const [plannerSlots, setPlannerSlots] = useState<DateCourse[]>([]);
   const [candidates, setCandidates] = useState<CandidatePlace[]>([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
+
+  // ── AI Course Planner state (FUN-HIS-006) ─────────────────────────────────
+  const [aiPlannerVisible, setAiPlannerVisible] = useState(false);
+  const [aiPlannerRoute, setAiPlannerRoute]     = useState<Array<{ latitude: number; longitude: number }>>([]);
 
   // ── Budget filter state ────────────────────────────────────────────────────
   const [budgetRange, setBudgetRange] = useState({ min: 0, max: 300_000 });
@@ -2959,10 +3101,11 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   };
 
   // Reactive coordinate chain — only visible (non-secret) courses form the polyline.
-  const courseRoute = useMemo(
-    () => generateRoutePolylineSegments(filteredCourses),
-    [filteredCourses],
-  );
+  // When AI planner has produced an optimized route, use that instead.
+  const courseRoute = useMemo(() => {
+    if (aiPlannerRoute.length > 0) return aiPlannerRoute;
+    return generateRoutePolylineSegments(filteredCourses);
+  }, [filteredCourses, aiPlannerRoute]);
 
   // ── GPS real-time location engine (Step #32) ──────────────────────────────
   const geoLocation = useGeoLocation();
@@ -3215,18 +3358,35 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         </View>
       )}
 
-      {/* ── Planner trigger strip ── */}
+      {/* ── Planner trigger strips ── */}
       {!recommendations && !isLoadingAI && (
-        <Pressable style={mapV.plannerTrigger} onPress={() => setPlannerVisible(true)}>
-          <LinearGradient
-            colors={['rgba(74,222,128,0.09)', 'rgba(34,211,238,0.06)']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={mapV.plannerTriggerGrad}
+        <View style={mapV.plannerTriggerGroup}>
+          {/* Slot-based planner (existing) */}
+          <Pressable style={[mapV.plannerTrigger, { flex: 1, marginHorizontal: 0, marginTop: 0, marginBottom: 0 }]} onPress={() => setPlannerVisible(true)}>
+            <LinearGradient
+              colors={['rgba(74,222,128,0.09)', 'rgba(34,211,238,0.06)']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={mapV.plannerTriggerGrad}
+            >
+              <Text style={mapV.plannerTriggerTxt}>📋 코스 플래너</Text>
+              <Text style={mapV.plannerTriggerHint}>핀 탭해 시작</Text>
+            </LinearGradient>
+          </Pressable>
+          {/* AI Course Planner (new) */}
+          <Pressable
+            style={[mapV.plannerTrigger, mapV.aiPlannerTrigger]}
+            onPress={() => setAiPlannerVisible(true)}
           >
-            <Text style={mapV.plannerTriggerTxt}>📋 코스 플래너 열기</Text>
-            <Text style={mapV.plannerTriggerHint}>지도를 롱프레스하거나 핀을 탭해 시작</Text>
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={['rgba(124,58,237,0.18)', 'rgba(217,70,239,0.12)']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={mapV.plannerTriggerGrad}
+            >
+              <Text style={mapV.aiPlannerTriggerTxt}>🗺️ AI 코스 플래너</Text>
+              <Text style={mapV.plannerTriggerHint}>자동 동선 최적화</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
       )}
 
       {/* ── Recommendation confirm panel OR course list ── */}
@@ -3348,6 +3508,7 @@ function DateMapView({ t }: { t: ThemeTokens }) {
       <LayerControlPanel
         visible={layerPanelVisible}
         onClose={() => setLayerPanelVisible(false)}
+        t={t}
       />
 
       {/* ── Date Course Planner Bottom Sheet ── */}
@@ -3362,6 +3523,17 @@ function DateMapView({ t }: { t: ThemeTokens }) {
         budgetRange={budgetRange}
         onBudgetChange={handleBudgetChange}
         totalConfirmedBudget={totalConfirmedBudget}
+      />
+
+      {/* ── AI 코스 플래너 Bottom Sheet (FUN-HIS-006) ── */}
+      <CoursePlanner
+        visible={aiPlannerVisible}
+        onClose={() => setAiPlannerVisible(false)}
+        courses={[...filteredCourses, ...visibleSecretCourses]}
+        isLight={t.isLight}
+        onOptimized={(ordered: OptimizedCourse[]) => {
+          setAiPlannerRoute(ordered.map((c) => ({ latitude: c.latitude, longitude: c.longitude })));
+        }}
       />
     </View>
   );
@@ -3533,6 +3705,21 @@ const mapV = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  plannerTriggerGroup: {
+    flexDirection: 'row',
+    marginHorizontal: Spacing.base,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 8,
+  },
+  aiPlannerTrigger: {
+    flex: 1,
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 0,
+    borderColor: 'rgba(124,58,237,0.35)',
+  },
+  aiPlannerTriggerTxt: { color: '#A78BFA', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   plannerTriggerTxt: { color: '#4ADE80', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   plannerTriggerHint: { color: '#334155', fontSize: 10 },
   listHeader: {

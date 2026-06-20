@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
     gap: 6,
     padding: Spacing.md,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   ootdChipEmoji: { fontSize: 16 },
   ootdChipText: {

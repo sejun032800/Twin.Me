@@ -3130,6 +3130,27 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     return generateRoutePolylineSegments(filteredCourses);
   }, [filteredCourses, aiPlannerRoute]);
 
+  // ── Empty-state guide overlay: fade out after 5 s ─────────────────────────
+  const overlayOpacity = useSharedValue(1);
+  const [overlayVisible, setOverlayVisible] = useState(true);
+  const overlayAnimStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }));
+
+  useEffect(() => {
+    if (allMapCourses.length > 0) {
+      // Courses exist — hide immediately without animation
+      overlayOpacity.value = 0;
+      setOverlayVisible(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      overlayOpacity.value = withTiming(0, { duration: 600 });
+      setTimeout(() => setOverlayVisible(false), 620);
+    }, 5000);
+    return () => clearTimeout(timer);
+  // Only run on mount and when course count crosses 0→positive boundary
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMapCourses.length]);
+
   // ── GPS real-time location engine (Step #32) ──────────────────────────────
   const geoLocation = useGeoLocation();
 
@@ -3275,6 +3296,20 @@ function DateMapView({ t }: { t: ThemeTokens }) {
           userLocation={geoLocation.isReal ? geoLocation.coords : undefined}
           onMapLongPress={handleMapLongPress}
         />
+
+        {/* ── Empty-state onboarding guide overlay ── */}
+        {overlayVisible && (
+          <Animated.View
+            style={[mapGuideS.overlay, overlayAnimStyle]}
+            pointerEvents="none"
+          >
+            <View style={mapGuideS.card}>
+              <Text style={mapGuideS.text}>
+                {'📍 지도를 롱프레스해서 첫 번째 데이트 장소를\n핀으로 꽂아보세요!'}
+              </Text>
+            </View>
+          </Animated.View>
+        )}
 
         {/* ── GPS 내 위치 버튼 (My Location FAB) — top-right inside map ── */}
         <Pressable
@@ -3561,6 +3596,31 @@ function DateMapView({ t }: { t: ThemeTokens }) {
     </View>
   );
 }
+
+const mapGuideS = StyleSheet.create({
+  overlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 20,
+  },
+  card: {
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.base,
+    paddingVertical: Spacing.md,
+    maxWidth: 280,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+  },
+  text: {
+    color: '#E2D9FF',
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+    textAlign: 'center',
+    fontWeight: FontWeight.medium,
+  },
+});
 
 const mapV = StyleSheet.create({
   root: { flex: 1 },

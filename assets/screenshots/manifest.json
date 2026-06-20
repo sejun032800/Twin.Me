@@ -1,0 +1,156 @@
+{
+  "light": [
+    {
+      "id": "01",
+      "label": "앱 스플래시 화면",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_01_light.png"
+    },
+    {
+      "id": "02",
+      "label": "온보딩 1단계 서비스 소개",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_02_light.png"
+    },
+    {
+      "id": "03",
+      "label": "온보딩 카카오톡 업로드 가이드",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_03_light.png"
+    },
+    {
+      "id": "04",
+      "label": "AI 룸 최초 진입 웰컴 버블",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_04_light.png"
+    },
+    {
+      "id": "05",
+      "label": "분석가 룸 최초 진입 웰컴 버블",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_05_light.png"
+    },
+    {
+      "id": "06",
+      "label": "홈 탭 DNAScoreCard 전체",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_06_light.png"
+    },
+    {
+      "id": "07",
+      "label": "AI 코칭 카드 TypingIndicator",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_07_light.png"
+    },
+    {
+      "id": "08",
+      "label": "채팅 메인 인터페이스",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_08_light.png"
+    },
+    {
+      "id": "09",
+      "label": "주간 리포트 모달 Best 모먼트",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_09_light.png"
+    },
+    {
+      "id": "10",
+      "label": "히스토리 지도 롱프레스 오버레이",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_10_light.png"
+    },
+    {
+      "id": "11",
+      "label": "지도 데이트 핀 + 코스 카드",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_11_light.png"
+    },
+    {
+      "id": "12",
+      "label": "설정 메인 인덱스",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_12_light.png"
+    },
+    {
+      "id": "13",
+      "label": "구독 플랜 프리미엄 CTA",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_13_light.png"
+    },
+    {
+      "id": "14",
+      "label": "소셜 계정 연동 화면",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_14_light.png"
+    },
+    {
+      "id": "15",
+      "label": "기억 삭제 섹션 클린 상태",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/light/shot_15_light.png"
+    }
+  ],
+  "dark": [
+    {
+      "id": "01",
+      "label": "앱 스플래시 화면",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_01_dark.png"
+    },
+    {
+      "id": "02",
+      "label": "온보딩 1단계 서비스 소개",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_02_dark.png"
+    },
+    {
+      "id": "03",
+      "label": "온보딩 카카오톡 업로드 가이드",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_03_dark.png"
+    },
+    {
+      "id": "04",
+      "label": "AI 룸 최초 진입 웰컴 버블",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_04_dark.png"
+    },
+    {
+      "id": "05",
+      "label": "분석가 룸 최초 진입 웰컴 버블",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_05_dark.png"
+    },
+    {
+      "id": "06",
+      "label": "홈 탭 DNAScoreCard 전체",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_06_dark.png"
+    },
+    {
+      "id": "07",
+      "label": "AI 코칭 카드 TypingIndicator",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_07_dark.png"
+    },
+    {
+      "id": "08",
+      "label": "채팅 메인 인터페이스",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_08_dark.png"
+    },
+    {
+      "id": "09",
+      "label": "주간 리포트 모달 Best 모먼트",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_09_dark.png"
+    },
+    {
+      "id": "10",
+      "label": "히스토리 지도 롱프레스 오버레이",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_10_dark.png"
+    },
+    {
+      "id": "11",
+      "label": "지도 데이트 핀 + 코스 카드",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_11_dark.png"
+    },
+    {
+      "id": "12",
+      "label": "설정 메인 인덱스",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_12_dark.png"
+    },
+    {
+      "id": "13",
+      "label": "구독 플랜 프리미엄 CTA",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_13_dark.png"
+    },
+    {
+      "id": "14",
+      "label": "소셜 계정 연동 화면",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_14_dark.png"
+    },
+    {
+      "id": "15",
+      "label": "기억 삭제 섹션 클린 상태",
+      "path": "/workspaces/twin.me-react-native/assets/screenshots/dark/shot_15_dark.png"
+    }
+  ]
+}

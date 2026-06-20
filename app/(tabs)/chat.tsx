@@ -33,6 +33,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { triggerHaptic } from '../../src/utils/haptics';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -231,7 +232,7 @@ function EarlyModeToggle({
 
   const handleToggle = () => {
     const next = !value;
-    Haptics.impactAsync(next ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
     onChange(next);
   };
 
@@ -898,7 +899,7 @@ function GiftCatalogSheet({
                 ]}
                 onPress={() => {
                   setSelectedId(gift.id);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  triggerHaptic(() => Haptics.selectionAsync());
                 }}
                 activeOpacity={0.75}
               >
@@ -1075,8 +1076,8 @@ function CrisisMode({
       cardScale.value = withSpring(1, { damping: 16, stiffness: 180 });
       cardOpacity.value = withTiming(1, { duration: 350 });
       const boom = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 220);
+        triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy));
+        setTimeout(() => triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)), 220);
       };
       boom(); setTimeout(boom, 1300); setTimeout(boom, 2700);
     } else {
@@ -1237,7 +1238,7 @@ function RepairBidsBar({ onSelect }: { onSelect: (text: string) => void }) {
             key={bid}
             style={repairStyles.chip}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              triggerHaptic(() => Haptics.selectionAsync());
               onSelect(bid);
             }}
             activeOpacity={0.78}
@@ -1258,8 +1259,8 @@ const repairStyles = StyleSheet.create({
     backgroundColor: 'rgba(127,0,43,0.07)',
   },
   label: {
-    color: 'rgba(252,165,165,0.70)',
-    fontSize: 10,
+    color: '#FCA5A5',
+    fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.4,
     paddingHorizontal: 14,
@@ -1486,7 +1487,7 @@ const reportBannerStyles = StyleSheet.create({
   glowLayer: { borderRadius: 12 },
   icon: { fontSize: 18 },
   textCol: { flex: 1 },
-  weekTag: { color: '#A78BFA', fontSize: 10, fontWeight: '700' as const, marginBottom: 1 },
+  weekTag: { color: '#A78BFA', fontSize: 11, fontWeight: '700' as const, marginBottom: 1 },
   body: { color: '#C084FC', fontSize: 12, fontWeight: '600' as const, lineHeight: 16 },
   chevron: { color: '#7C3AED', fontSize: 20, fontWeight: '300' as const },
 });
@@ -1537,14 +1538,29 @@ function ChatRoomView({
       id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 60000,
       text: `이 채팅방은 ${partnerName}님과의 실제 대화 공간이에요. 카카오톡에서 직접 대화를 이어가세요! 💌`,
     }];
-    if (roomType === 'analyst') return [
-      { id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 120000, text: `안녕하세요! 저는 연애 분석가 트윈이예요 🔬\n두 분의 관계를 분석하고, 더 행복한 연애를 도와드릴게요.` },
-      { id: 'report-0', role: 'ai', type: 'report_card', timestamp: Date.now() - 60000, text: '' },
-    ];
-    return [{ id: '0', role: 'ai', type: 'normal', timestamp: Date.now() - 60000, text: `안녕~ 나야 ${partnerName} AI ⚡ 보고 싶었어 🥺` }];
+    // ai / analyst rooms start empty — virtual welcome bubble injected at FlatList level
+    return [];
   };
 
   const [messages, setMessages] = useState<Message[]>(getInitialMessages());
+
+  // Virtual welcome messages: injected into FlatList when messages is empty (not persisted)
+  const welcomeMsg: Message = roomType === 'analyst'
+    ? {
+        id: 'welcome-analyst-bubble',
+        role: 'ai',
+        type: 'normal',
+        timestamp: Date.now(),
+        text: '이번 주 연애 분석 리포트가 아직 없어요. 카카오톡 대화를 업로드하면 매주 일요일 밤 리포트가 도착해요 📊',
+      }
+    : {
+        id: 'welcome-ai-bubble',
+        role: 'ai',
+        type: 'normal',
+        timestamp: Date.now(),
+        text: `안녕하세요! 저는 ${partnerName || '연인'}의 말투를 학습한 트윈이에요. 연인에게 보낼 메시지를 저한테 먼저 써보세요 💌`,
+      };
+  const listData = messages.length === 0 ? [welcomeMsg] : messages;
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [feedbackVisible, setFeedbackVisible] = useState(false);
@@ -1594,7 +1610,7 @@ function ChatRoomView({
   useEffect(() => {
     if (crisisResult?.crisisModalTrigger && !crisisModalShownRef.current) {
       crisisModalShownRef.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      triggerHaptic(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); });
       setTimeout(() => setCrisisVisible(true), 600);
     }
     if (!crisisResult?.crisisModalTrigger) {
@@ -1606,7 +1622,7 @@ function ChatRoomView({
   useEffect(() => {
     if (triggerMirrorMode) {
       setTriggerMirrorMode(false);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      triggerHaptic(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); });
       setTimeout(() => setCrisisVisible(true), 400);
     }
   }, [triggerMirrorMode]);
@@ -1726,7 +1742,7 @@ function ChatRoomView({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     } catch {
       Alert.alert('위치 오류', '현재 위치를 가져올 수 없습니다. 잠시 후 다시 시도해주세요.');
     }
@@ -1735,8 +1751,7 @@ function ChatRoomView({
   // ── [Step #17] Gift send ────────────────────────────────────────────────────
   const handleSendGift = useCallback((gift: GiftItem) => {
     setGiftSheetVisible(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 300);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     addMessage({
       id: `gift-${Date.now()}`,
       role: 'user',
@@ -1752,7 +1767,7 @@ function ChatRoomView({
   // ── 카카오톡 대화 학습 (Step #50) ─────────────────────────────────────────────
   const handleKakaoLearn = useCallback(async () => {
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      triggerHaptic(() => Haptics.selectionAsync());
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
         copyToCacheDirectory: true,
@@ -1789,7 +1804,7 @@ function ChatRoomView({
 
       if (newRecords.length > 0) {
         addMemorySentences(newRecords);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
         Alert.alert(
           `트윈이가 ${newRecords.length}개의 설레는 순간을 발견했어요 ✨`,
           `${deltaCount}개의 새 대화 중에서 가장 빛나는 ${newRecords.length}개를 골라 두 분의 연애 DNA에 새겼어요. 추억 월에서 확인해 보세요! 💕`,
@@ -1935,7 +1950,7 @@ function ChatRoomView({
         pendingSendTextRef.current = text;
         setInterceptResult(hit);
         setInterceptVisible(true);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning));
         return;
       }
     }
@@ -2013,7 +2028,7 @@ function ChatRoomView({
         humor: toneWeightRef.current.humor + (opt.weight.humor ?? 0),
       };
     }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     const newCount = correctionCount + 1;
     setCorrectionCount(newCount);
     if (selectedMessage) {
@@ -2102,7 +2117,7 @@ function ChatRoomView({
               handlePickImage();
             }}
             onLongPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
               setShowAttachBar(true);
             }}
             delayLongPress={400}
@@ -2158,7 +2173,7 @@ function ChatRoomView({
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={listData}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messageList}
           style={{ backgroundColor: t.bg }}
@@ -2174,7 +2189,7 @@ function ChatRoomView({
                 if (roomType !== 'partner') {
                   setSelectedMessage(msg);
                   setFeedbackVisible(true);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
                 }
               }}
             />
@@ -2551,7 +2566,7 @@ const styles = StyleSheet.create({
   aiSectionLabel: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.base, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
   aiSectionLine: { flex: 1, height: StyleSheet.hairlineWidth },
   aiSectionBadge: { backgroundColor: `${Colors.BADGE_AI_BLUE}18`, borderRadius: Radius.pill, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: `${Colors.BADGE_AI_BLUE}35` },
-  aiSectionBadgeText: { color: Colors.BADGE_AI_BLUE, fontSize: 9, fontWeight: FontWeight.semibold },
+  aiSectionBadgeText: { color: Colors.BADGE_AI_BLUE, fontSize: 11, fontWeight: FontWeight.semibold },
 
   // DM Row
   dmRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.base, paddingVertical: Spacing.md, gap: Spacing.md },
@@ -2604,12 +2619,12 @@ const styles = StyleSheet.create({
   attachBar: { flexDirection: 'row', paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, gap: Spacing.base, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(124,58,237,0.15)', backgroundColor: 'rgba(124,58,237,0.04)' },
   attachBtn: { alignItems: 'center', gap: 3, flex: 1 },
   attachBtnIcon: { fontSize: 24 },
-  attachBtnLabel: { fontSize: 9, color: Colors.TEXT_MUTED },
+  attachBtnLabel: { fontSize: 11, color: Colors.TEXT_MUTED },
 
   // Profile HUD
   hudRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: Spacing.base, borderBottomWidth: 1 },
-  hudText: { fontSize: 10, fontWeight: FontWeight.medium },
-  hudDivider: { fontSize: 10 },
+  hudText: { fontSize: 11, fontWeight: FontWeight.medium },
+  hudDivider: { fontSize: 11 },
 
   // Sensitive Warning Banner
   sensitiveBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: Spacing.base, marginBottom: 4, backgroundColor: 'rgba(251,191,36,0.12)', borderRadius: Radius.md, padding: Spacing.sm, paddingHorizontal: Spacing.md, borderWidth: 1.5, borderColor: 'rgba(251,191,36,0.45)' },
@@ -2643,7 +2658,7 @@ const styles = StyleSheet.create({
   uploadOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(10,13,26,0.78)', paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center', gap: 5 },
   uploadProgressTrack: { width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' },
   uploadProgressFill: { height: '100%', backgroundColor: Colors.GRADIENT_END, borderRadius: 2 },
-  uploadProgressText: { color: '#fff', fontSize: 10, fontWeight: FontWeight.semibold },
+  uploadProgressText: { color: '#fff', fontSize: 11, fontWeight: FontWeight.semibold },
 
   // ── [Step #17] Location Bubble ────────────────────────────────────────────
   locationCard: { borderRadius: Radius.xl, overflow: 'hidden', maxWidth: 240 },
@@ -2657,7 +2672,7 @@ const styles = StyleSheet.create({
   locationMapPin: { fontSize: 28 },
   locationInfo: { padding: Spacing.md, gap: 3 },
   locationLabel: { color: '#E2D9FF', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  locationCoords: { color: 'rgba(226,217,255,0.6)', fontSize: 10, fontFamily: 'monospace' },
+  locationCoords: { color: '#C4B5FD', fontSize: 11, fontFamily: 'monospace' },
   locationOpenBtn: { marginTop: 5, backgroundColor: 'rgba(124,58,237,0.3)', borderRadius: Radius.md, paddingVertical: 5, paddingHorizontal: 10, alignSelf: 'flex-start' },
   locationOpenText: { color: '#A78BFA', fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
 
@@ -2680,8 +2695,8 @@ const styles = StyleSheet.create({
   giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: Spacing.md },
   giftGridItem: { width: '30%', borderRadius: Radius.lg, padding: Spacing.sm, alignItems: 'center', gap: 3 },
   giftGridEmoji: { fontSize: 28 },
-  giftGridName: { fontSize: 10, fontWeight: FontWeight.semibold, textAlign: 'center' },
-  giftGridPrice: { fontSize: 9, textAlign: 'center' },
+  giftGridName: { fontSize: 11, fontWeight: FontWeight.semibold, textAlign: 'center' },
+  giftGridPrice: { fontSize: 11, textAlign: 'center' },
   giftSendBtn: { borderRadius: Radius.pill, overflow: 'hidden', marginBottom: Spacing.sm },
   giftSendBtnGrad: { paddingVertical: Spacing.md, alignItems: 'center' },
   giftSendBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold },

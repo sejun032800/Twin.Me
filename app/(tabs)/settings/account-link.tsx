@@ -30,44 +30,46 @@ interface ProviderConfig {
   logo: string;
 }
 
-const PROVIDERS: ProviderConfig[] = [
-  {
-    id: 'GOOGLE',
-    label: 'Google',
-    sublabel: 'Gmail · Google 계정',
-    bgColor: '#FFFFFF',
-    borderColor: '#DADCE0',
-    textColor: '#202124',
-    logo: 'G',
-  },
-  {
-    id: 'KAKAO',
-    label: 'Kakao',
-    sublabel: '카카오계정 · 카카오톡',
-    bgColor: '#FEE500',
-    borderColor: '#E6CC00',
-    textColor: '#191919',
-    logo: 'K',
-  },
-  {
-    id: 'NAVER',
-    label: 'Naver',
-    sublabel: '네이버 아이디 · NAVER',
-    bgColor: '#03C75A',
-    borderColor: '#02A94B',
-    textColor: '#FFFFFF',
-    logo: 'N',
-  },
-  {
-    id: 'APPLE',
-    label: 'Apple',
-    sublabel: 'Apple ID · iCloud',
-    bgColor: '#000000',
-    borderColor: '#1A1A1A',
-    textColor: '#FFFFFF',
-    logo: '',
-  },
-];
+function getProviders(isLight: boolean): ProviderConfig[] {
+  return [
+    {
+      id: 'GOOGLE',
+      label: 'Google',
+      sublabel: 'Gmail · Google 계정',
+      bgColor:     isLight ? '#FFFFFF' : '#131314',
+      borderColor: isLight ? '#DADCE0' : '#8E918F',
+      textColor:   isLight ? '#202124' : '#E3E3E3',
+      logo: 'G',
+    },
+    {
+      id: 'KAKAO',
+      label: 'Kakao',
+      sublabel: '카카오계정 · 카카오톡',
+      bgColor: '#FEE500',
+      borderColor: '#E6CC00',
+      textColor: '#191919',
+      logo: 'K',
+    },
+    {
+      id: 'NAVER',
+      label: 'Naver',
+      sublabel: '네이버 아이디 · NAVER',
+      bgColor: '#03C75A',
+      borderColor: '#02A94B',
+      textColor: '#FFFFFF',
+      logo: 'N',
+    },
+    {
+      id: 'APPLE',
+      label: 'Apple',
+      sublabel: 'Apple ID · iCloud',
+      bgColor:     isLight ? '#FFFFFF' : '#000000',
+      borderColor: isLight ? '#000000' : '#1A1A1A',
+      textColor:   isLight ? '#000000' : '#FFFFFF',
+      logo: '',
+    },
+  ];
+}
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
@@ -254,7 +256,7 @@ export default function AccountLinkScreen() {
         <View style={s.section}>
           <Text style={[s.sectionTitle, { color: t.textMuted }]}>연동 가능한 계정</Text>
           <View style={s.providerList}>
-            {PROVIDERS.map((config) => {
+            {getProviders(t.isLight).map((config) => {
               const isLinked = userAccount.linkedProviders.includes(config.id);
               const isLoading = loadingProvider === config.id;
               return (

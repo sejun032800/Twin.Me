@@ -4,6 +4,7 @@ import TabTutorialOverlay, { TutorialStep } from '../../../src/components/onboar
 import { useTutorialGuard } from '../../../src/hooks/useTutorialGuard';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import { triggerHaptic } from '../../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -13,6 +14,7 @@ import {
   Alert,
   Dimensions,
   Image,
+  LayoutAnimation,
   Linking,
   Modal,
   PanResponder,
@@ -22,8 +24,13 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import Animated, {
   Easing,
   runOnJS,
@@ -87,8 +94,15 @@ function ThemeToggleSection({
 }) {
   const handlePress = (mode: ThemeMode) => {
     if (mode === themeMode) return;
+    LayoutAnimation.configureNext(
+      LayoutAnimation.create(
+        300,
+        LayoutAnimation.Types.easeInEaseOut,
+        LayoutAnimation.Properties.opacity,
+      ),
+    );
     onChangeTheme(mode);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
   };
 
   return (
@@ -289,7 +303,7 @@ function PrivacySlider({ t, onSyncError }: { t: ThemeTokens; onSyncError: () => 
   // Tick haptic + local optimistic update — fires on every stage change during drag
   const changeStage = (newStage: PrivacyStage) => {
     if (newStage === prevStage.current) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
     descSVs.current[prevStage.current].value = withTiming(0, { duration: 140 });
     descSVs.current[newStage].value          = withDelay(100, withTiming(1, { duration: 210 }));
     glowColor.value = withTiming(newStage / 2, { duration: 300 });
@@ -326,7 +340,7 @@ function PrivacySlider({ t, onSyncError }: { t: ThemeTokens; onSyncError: () => 
       })
       .catch(() => {
         setSyncState('error');
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
         rollbackToStage(startStage);
         onSyncErrorRef.current();
         setTimeout(() => setSyncState('idle'), 3500);
@@ -339,7 +353,7 @@ function PrivacySlider({ t, onSyncError }: { t: ThemeTokens; onSyncError: () => 
       onMoveShouldSetPanResponder:  () => true,
       onPanResponderGrant: () => {
         dragStartStage.current = prevStage.current;
-        Haptics.selectionAsync();
+        triggerHaptic(() => Haptics.selectionAsync());
       },
       onPanResponderMove: (_, gs) => {
         const raw     = stagePositions[prevStage.current] + gs.dx;
@@ -704,6 +718,7 @@ function formatLearnedAt(iso: string): string {
 }
 
 function MemoryEraser({ t }: { t: ThemeTokens }) {
+  const router = useRouter();
   const [learnedMemories, setLearnedMemories] = useState<LearnedMemory[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
@@ -767,7 +782,7 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
 
   const handlePressDelete = () => {
     if (selectedIds.size === 0 || isDeleting) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); });
     setShowModal(true);
   };
 
@@ -799,11 +814,11 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
         // Success — physically purge from local state (true hard-delete confirmed)
         setLearnedMemories((prev) => prev.filter((m) => !targetIds.includes(m.id)));
         setSelectedIds(new Set());
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
       } catch {
         // Failure — rollback: items reappear since we never removed them optimistically
         setDeletionError('기억을 지우는 과정에서 안개가 꼈어요 🌫️ 잠시 후 다시 파기해 주세요.');
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
       } finally {
         setApiPending(false);
         setDissolving(false);
@@ -852,10 +867,17 @@ function MemoryEraser({ t }: { t: ThemeTokens }) {
             style={meS.cleanGradient}
           >
             <Text style={meS.cleanEmoji}>🌌</Text>
-            <Text style={meS.cleanTitle}>완전히 깨끗한 도화지 상태</Text>
+            <Text style={meS.cleanTitle}>트윈이의 기억이 맑게 비어 있어요</Text>
             <Text style={[meS.cleanSub, { color: t.textSecondary }]}>
-              트윈이가 나에 대해 기억하는{'\n'}깨끗한 도화지 상태입니다 🌌
+              아직 학습된 기억이 없어요.{'\n'}채팅에서 대화를 나누거나 카카오톡을 업로드하면{'\n'}트윈이가 두 분만의 이야기를 기억하기 시작해요 💌
             </Text>
+            <Pressable
+              style={meS.cleanCTA}
+              onPress={() => router.push('/(tabs)/chat' as any)}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
+              <Text style={meS.cleanCTAText}>채팅 탭에서 시작하기 →</Text>
+            </Pressable>
           </LinearGradient>
         </Animated.View>
       ) : dissolving ? (
@@ -1054,6 +1076,23 @@ const meS = StyleSheet.create({
     fontSize: FontSize.sm,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  cleanCTA: {
+    marginTop: 16,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.50)',
+    backgroundColor: 'rgba(124,58,237,0.12)',
+  },
+  cleanCTAText: {
+    color: '#C4B5FD',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    textAlign: 'center',
   },
   apiPendingBox: {
     flexDirection: 'row',
@@ -1369,7 +1408,8 @@ interface PlanCardProps {
 }
 
 function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
-  const { subscriptionStatus } = useAppContext();
+  const { subscriptionStatus, themeTokens } = useAppContext();
+  const isLight = themeTokens.isLight;
   const scale   = useSharedValue(1);
   const shimmer = useSharedValue(0);
 
@@ -1422,7 +1462,7 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
       withTiming(0.94, { duration: 60, easing: Easing.out(Easing.quad) }),
       withSpring(1, { damping: 14, stiffness: 800 }),
     );
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     onPurchase(plan.id);
   };
 
@@ -1496,7 +1536,7 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
         >
           {isThisPurchasing ? (
             <LinearGradient
-              colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+              colors={isLight ? ['#FFB7CE', '#B39DDB'] : ['#7C3AED', '#D946EF', '#FF6B8B']}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.buyGradient}
@@ -1507,14 +1547,19 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
             <LinearGradient
               colors={
                 isSubscribedToThis
-                  ? (['#7C3AED', '#F59E0B'] as const)
-                  : (['#7C3AED', '#D946EF', '#FF6B8B'] as const)
+                  ? (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#F59E0B'] as const))
+                  : (isLight ? (['#FFB7CE', '#B39DDB'] as const) : (['#7C3AED', '#D946EF', '#FF6B8B'] as const))
               }
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.buyGradient}
             >
-              <Text style={styles.buyText}>
+              <Text style={[
+                styles.buyText,
+                isLight
+                  ? { color: '#2D1B5A' }
+                  : { color: '#fff', textShadowColor: 'rgba(15, 23, 42, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+              ]}>
                 {isSubscribedToThis ? '✅ 구독 중' : '구독 시작하기'}
               </Text>
             </LinearGradient>
@@ -1572,12 +1617,12 @@ function SubscriptionStore() {
     try {
       const status = await purchaseSubscription(planId);
       setSubscriptionStatus(status);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
     } catch (err) {
       const isCancelled = (err as { userCancelled?: boolean }).userCancelled === true;
       if (!isCancelled) {
         showSnackbar('결제가 완료되지 않았어요. 스토어 계정 상태를 확인해 주세요 💳');
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
       }
     } finally {
       setPurchasingPlanId(null);
@@ -1772,7 +1817,7 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
   }));
 
   const handleUpdateAvatar = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.selectionAsync());
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -1875,7 +1920,7 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
               )}
               {isUploading && (
                 <View style={styles.profileImageOverlay}>
-                  <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700', textAlign: 'center' }}>
+                  <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700', textAlign: 'center' }}>
                     저장중{'\n'}···
                   </Text>
                 </View>
@@ -1911,7 +1956,7 @@ function ProfileHeader({ t }: { t: ThemeTokens }) {
         <Pressable
           style={phS.socialBadgeRow}
           onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            triggerHaptic(() => Haptics.selectionAsync());
             router.push('/settings/account-link' as any);
           }}
           hitSlop={4}
@@ -1991,7 +2036,7 @@ const phS = StyleSheet.create({
   },
   goldBadgeText: {
     color: '#FFF',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800' as const,
     letterSpacing: 0.3,
   },
@@ -2040,7 +2085,6 @@ const phS = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600' as const,
     marginLeft: 1,
-    opacity: 0.5,
   },
 });
 
@@ -2185,7 +2229,7 @@ function AccountCenterSection({ t }: { t: ThemeTokens }) {
           desc={item.desc}
           isLast={i === items.length - 1}
           onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            triggerHaptic(() => Haptics.selectionAsync());
             router.push(item.route as any);
           }}
         />
@@ -2243,7 +2287,7 @@ function SupportLegalSection({
       desc: '자주 묻는 질문 및 고객 지원',
       external: false,
       onPress: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        triggerHaptic(() => Haptics.selectionAsync());
         onHelpCenterPress();
       },
     },
@@ -2255,7 +2299,7 @@ function SupportLegalSection({
       desc: '데이터 수집 · 이용 · 보호 방침',
       external: false,
       onPress: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        triggerHaptic(() => Haptics.selectionAsync());
         router.push('/settings/privacy-policy' as any);
       },
     },
@@ -2267,7 +2311,7 @@ function SupportLegalSection({
       desc: '서비스 제공 조건 및 이용 규칙',
       external: false,
       onPress: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        triggerHaptic(() => Haptics.selectionAsync());
         router.push('/settings/terms' as any);
       },
     },
@@ -2323,7 +2367,7 @@ function KakaoSyncSection({ t }: { t: ThemeTokens }) {
 
   const handleSyncPress = async () => {
     if (isSyncing) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.selectionAsync());
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -2360,7 +2404,7 @@ function KakaoSyncSection({ t }: { t: ThemeTokens }) {
 
       if (newRecords.length > 0) {
         addMemorySentences(newRecords);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
         setLastResult(`✅ 신규 ${deltaCount}건 → 감동 순간 ${newRecords.length}개 추가됨`);
       } else if (deltaCount === 0) {
         setLastResult('✅ 이미 최신 상태 — 새 대화 없음');
@@ -2552,7 +2596,7 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
         ]}
         onPress={() => {
           if (isLoggingOut || isDeleting) return;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
           setShowLogoutConfirm(true);
         }}
         disabled={isLoggingOut || isDeleting}
@@ -2573,7 +2617,7 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
         ]}
         onPress={() => {
           if (isLoggingOut || isDeleting) return;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          triggerHaptic(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); });
           setShowDeleteModal(true);
         }}
         disabled={isLoggingOut || isDeleting}
@@ -3228,7 +3272,7 @@ const styles = StyleSheet.create({
   },
   memoryDot: {
     color: Colors.ALERT_SIREN_RED,
-    fontSize: 10,
+    fontSize: 11,
   },
   memoryItemText: {
     fontSize: FontSize.sm,

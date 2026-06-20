@@ -25,6 +25,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { triggerHaptic } from '../../utils/haptics';
 import { FontSize, FontWeight, Radius, Spacing } from '../../styles/theme';
 import type { DateCourse } from '../../context/AppContext';
 import {
@@ -50,7 +51,7 @@ function StatusBadge({
 
   const handlePress = () => {
     scale.value = withSequence(withTiming(0.88, { duration: 80 }), withSpring(1, { damping: 10 }));
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(() => Haptics.selectionAsync());
     onToggle();
   };
 
@@ -255,7 +256,7 @@ export function CoursePlanner({ visible, onClose, courses, isLight, onOptimized 
 
   const handleOptimize = () => {
     if (isOptimizing || courses.length === 0) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     triggerShuffle();
     setIsOptimizing(true);
 
@@ -265,7 +266,7 @@ export function CoursePlanner({ visible, onClose, courses, isLight, onOptimized 
       setAnimKey((k) => k + 1);
       onOptimized(result);
       setIsOptimizing(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
     }, 300);
   };
 

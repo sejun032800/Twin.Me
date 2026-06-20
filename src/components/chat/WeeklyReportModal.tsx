@@ -581,6 +581,8 @@ function PaywallNudgeModal({
   onClose: () => void;
   onVirtualPurchase: () => void;
 }) {
+  const { themeTokens } = useAppContext();
+  const isLight = themeTokens.isLight;
   const scale = useSharedValue(0.88);
   const opacity = useSharedValue(0);
 
@@ -632,11 +634,16 @@ function PaywallNudgeModal({
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={['#7C3AED', '#D946EF', '#FF6B8B']}
+            colors={isLight ? ['#FFB7CE', '#B39DDB'] : ['#7C3AED', '#D946EF', '#FF6B8B']}
             start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
             style={pwStyles.ctaGrad}
           >
-            <Text style={pwStyles.ctaText}>🔓 지금 바로 구독 · 즉시 잠금 해제</Text>
+            <Text style={[
+              pwStyles.ctaText,
+              isLight
+                ? { color: '#2D1B5A' }
+                : { color: '#fff', textShadowColor: 'rgba(15, 23, 42, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+            ]}>🔓 지금 바로 구독 · 즉시 잠금 해제</Text>
           </LinearGradient>
         </TouchableOpacity>
         <TouchableOpacity style={pwStyles.closeBtn} onPress={onClose}>
@@ -1342,11 +1349,11 @@ const rStyles = StyleSheet.create({
     marginBottom: 4,
   },
   partnerBubbleAvatarText: { color: '#fff', fontSize: 12, fontWeight: FontWeight.bold },
-  chatBubble: { maxWidth: 220, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
-  chatBubbleMe: { backgroundColor: 'rgba(217,70,239,0.25)', borderBottomRightRadius: 4, borderWidth: 1, borderColor: 'rgba(255,107,139,0.45)' },
-  chatBubblePartner: { backgroundColor: 'rgba(30,41,59,0.85)', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: 'rgba(124,58,237,0.30)' },
-  chatBubbleText: { fontSize: FontSize.sm, lineHeight: 20 },
-  chatBubbleTextMe: { color: '#FFE0EC' },
+  chatBubble: { maxWidth: 220, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
+  chatBubbleMe: { backgroundColor: Colors.CARD_DARK_SLATE, borderBottomRightRadius: 4 },
+  chatBubblePartner: { backgroundColor: '#2D1B69', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#4C2B8A' },
+  chatBubbleText: { fontSize: FontSize.base, lineHeight: 22 },
+  chatBubbleTextMe: { color: '#F1F5F9' },
   chatBubbleTextPartner: { color: '#E2D9FF' },
   bubbleTime: { fontSize: 9, color: '#64748B', marginTop: 2 },
   bubbleTimeMe: { textAlign: 'right' },

@@ -1,7 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   StyleSheet,
   Text,
@@ -27,6 +26,46 @@ import {
 // ── Typing animation constants ───────────────────────────────────────────────
 const CHARS_PER_TICK = 3;
 const TICK_MS = 40;
+
+// ── Typing dots: 3-dot bounce indicator for loading state ───────────────────
+function TypingDots() {
+  const d1 = useRef(new Animated.Value(0)).current;
+  const d2 = useRef(new Animated.Value(0)).current;
+  const d3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const makeBounce = (dot: Animated.Value) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.spring(dot, { toValue: -6, useNativeDriver: true, damping: 4, stiffness: 200 }),
+          Animated.spring(dot, { toValue: 0,  useNativeDriver: true, damping: 4, stiffness: 200 }),
+        ]),
+      );
+    const entries = [
+      { dot: d1, delay: 0 },
+      { dot: d2, delay: 160 },
+      { dot: d3, delay: 320 },
+    ].map(({ dot, delay }) => {
+      const anim = makeBounce(dot);
+      const timer = setTimeout(() => anim.start(), delay);
+      return { anim, timer };
+    });
+    return () => entries.forEach(({ anim, timer }) => { clearTimeout(timer); anim.stop(); });
+  }, [d1, d2, d3]);
+
+  return (
+    <View style={dotStyles.row}>
+      {([d1, d2, d3] as Animated.Value[]).map((dot, i) => (
+        <Animated.View key={i} style={[dotStyles.dot, { transform: [{ translateY: dot }] }]} />
+      ))}
+    </View>
+  );
+}
+
+const dotStyles = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.GRADIENT_START },
+});
 
 // ── Category style map ───────────────────────────────────────────────────────
 const CATEGORY_META: Record<
@@ -230,11 +269,8 @@ export default function AICoachingCard({ t }: Props) {
 
       {/* Coaching text body */}
       {isLoading && !message ? (
-        <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={Colors.GRADIENT_START} />
-          <Text style={[styles.loadingText, { color: t.textMuted }]}>
-            {partnerProfile.name}님의 최근 상태를 분석하고 있어요...
-          </Text>
+        <View style={styles.loadingContainer}>
+          <TypingDots />
         </View>
       ) : (
         <Text style={[styles.coachingBody, { color: t.textSecondary }]}>
@@ -345,15 +381,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: FontWeight.semibold,
   },
-  loadingRow: {
-    flexDirection: 'row',
+  loadingContainer: {
+    minHeight: 80,
     alignItems: 'center',
-    gap: Spacing.sm,
-    minHeight: 52,
-  },
-  loadingText: {
-    fontSize: FontSize.sm,
-    flex: 1,
+    justifyContent: 'center',
   },
   coachingBody: {
     fontSize: FontSize.base,

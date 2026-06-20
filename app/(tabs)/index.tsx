@@ -617,8 +617,9 @@ const s = StyleSheet.create({
   },
   scoreNum: {
     fontSize: 32,
-    fontWeight: FontWeight.extrabold,
+    fontWeight: '900' as const,
     letterSpacing: -1,
+    fontVariant: ['tabular-nums'],
   },
   tierBlock: {
     alignItems: 'center',

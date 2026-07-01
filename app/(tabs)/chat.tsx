@@ -40,11 +40,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { maskPII, useAppContext } from '../../src/context/AppContext';
 import { runKakaoSyncPipeline } from '../../src/services/kakaoUploadService';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
-import { requestSelfAiLlmResponse, requestToneRegeneration, type ChatHistoryItem } from '../../src/services/selfAiService';
+import { requestSelfAiLlmResponse, requestToneRegeneration, generateTwinResponse, type ChatHistoryItem } from '../../src/services/selfAiService';
 import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
 import { useReportScheduler } from '../../src/hooks/useReportScheduler';
 import { useCrisisIntelligence, CrisisMessage, CrisisAnalysisResult } from '../../src/hooks/useCrisisIntelligence';
 import { classifyMessage, classifyHorsemenPatterns, type ClassifierMessage } from '../../src/engine/eventClassifier';
+import type { EventCode } from '../../src/engine/metrics';
+import { REALTIME_BUFFER_MS } from '../../src/engine/twinResponseEngine';
 import { WeeklyReportModal, ReportCardBubble } from '../../src/components/chat/WeeklyReportModal';
 import {
   initChatroomRealtimeSocket,
@@ -1637,6 +1639,10 @@ function ChatRoomView({
     setTriggerMirrorMode,
     processLiveEvent,
     rapidSwingActive,
+    overflowStatus,
+    evaluateIntervention,
+    selfAiNotifyQueue,
+    setSelfAiNotifyQueue,
     pendingGiftCard,
     setPendingGiftCard,
   } = useAppContext();
@@ -1717,6 +1723,10 @@ function ChatRoomView({
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMessages = useRef<string[]>([]);
   const lastSendTimeRef = useRef<number>(0);
+  // Twin Response Logic — 경로 B(인앱 실시간 스트림) 2.5초 입력 버퍼링
+  const detectionBufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detectionPendingTexts = useRef<string[]>([]);
+  const detectionBurstStartRef = useRef<number>(0);
 
   // ── Send button micro-motion: scale pop + green flash ───────────────────────
   const sendBtnScale = useSharedValue(1);
@@ -1779,6 +1789,17 @@ function ChatRoomView({
     });
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
   }, []);
+
+  // ── Twin Response Logic: NOTIFY 채널 큐 드레인 ───────────────────────────────
+  // 룸1 타이핑 중 발생한 사후 인정 발화 및 카톡 배치 요약(경로 A)은 이 큐에
+  // 쌓였다가, 대상 룸(룸2/룸3)이 마운트될 때 실제 말풍선으로 편입된다.
+  useEffect(() => {
+    if (roomType !== 'ai' && roomType !== 'analyst') return;
+    const mine = selfAiNotifyQueue.filter((n) => n.targetRoom === roomType);
+    if (mine.length === 0) return;
+    mine.forEach((n) => addMessage({ id: n.id, role: 'ai', text: n.text, timestamp: n.timestamp, type: 'normal' }));
+    setSelfAiNotifyQueue((prev) => prev.filter((n) => n.targetRoom !== roomType));
+  }, [roomType, selfAiNotifyQueue, setSelfAiNotifyQueue, addMessage]);
 
   // ── [Step #17] Realtime partner message listener ────────────────────────────
   useEffect(() => {
@@ -2039,6 +2060,94 @@ function ChatRoomView({
     setChatStyleProfile({ burstInterval: newBurst, avgCharsPerBubble: newAvg, typingSpeedFactor: newSpeed, splitTriggerPatterns: pats });
   }, [setChatStyleProfile]);
 
+  // ── Twin Response Logic: 채널 라우팅 (WARN/ADVISE/NOTIFY) ────────────────────
+  // evaluateIntervention()이 게이트를 통과시킨 코드에 한해서만 실제 유저 대면
+  // 피드백을 생성한다. WARN은 기존 FUN-CHA-003 강제 발동 파이프라인을 재사용하고,
+  // ADVISE는 기존 ToneGuidePopup 큐에, NOTIFY는 룸2/3 사후 알림 큐에 얹는다.
+  const runDetectionAndRoute = useCallback((codes: EventCode[], aggregatedText: string, now: number) => {
+    for (const code of codes) {
+      const detection = evaluateIntervention(code, {
+        now,
+        rapidSwing: rapidSwingActive,
+        criticalLoss: overflowStatus === 'CRITICAL_LOSS',
+      });
+      if (!detection) continue;
+
+      if (detection.channel === 'WARN') {
+        // 연인 폰에는 아무것도 가지 않음 — 오직 내 화면에만 반성의 거울 강제 발동
+        setTriggerMirrorMode(true);
+        continue;
+      }
+
+      const genCtx = {
+        myProfile,
+        trainingResult,
+        chatStyleProfile: profileRef.current,
+        isEarlyDatingMode,
+        isRoomEarlyMode,
+        privacyLevel,
+        roomType: 'ai' as const,
+      };
+
+      if (detection.channel === 'ADVISE') {
+        generateTwinResponse('ADVISE', detection.label, aggregatedText, genCtx, detection.mustAffirmSoon)
+          .then((suggestion) => {
+            streamState.pushToneAlert({ detectedKeyword: detection.label, suggestion, originalText: aggregatedText });
+          })
+          .catch(() => {});
+      } else {
+        generateTwinResponse('NOTIFY', detection.label, aggregatedText, genCtx, detection.mustAffirmSoon)
+          .then((line) => {
+            setSelfAiNotifyQueue((prev) => [
+              ...prev,
+              { id: `ntf-${now}-${code}`, targetRoom: 'ai' as const, text: line, timestamp: Date.now() },
+            ]);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [
+    evaluateIntervention, rapidSwingActive, overflowStatus, setTriggerMirrorMode,
+    myProfile, trainingResult, isEarlyDatingMode, isRoomEarlyMode, privacyLevel,
+    streamState, setSelfAiNotifyQueue,
+  ]);
+
+  // ── Twin Response Logic — 경로 B(인앱 실시간 스트림) 버퍼 flush ──────────────
+  // 2.5초 내 연타된 메시지를 하나의 문장 맥락으로 합산한 뒤 단 1회 탐지 호출한다.
+  const flushDetectionBuffer = useCallback(() => {
+    const batchTexts = detectionPendingTexts.current;
+    const burstCount = batchTexts.length;
+    detectionPendingTexts.current = [];
+    if (burstCount === 0) return;
+
+    const burstTimestamp = detectionBurstStartRef.current;
+    const aggregatedText = batchTexts.join(' ');
+
+    const normalHistory = chatHistoryRef.current.filter((m) => m.type === 'normal');
+    const priorHistory = normalHistory.slice(0, Math.max(0, normalHistory.length - burstCount));
+    const classifierHistory: ClassifierMessage[] = priorHistory.map((m) => ({
+      role: m.role === 'user' ? 'me' : 'partner', text: m.text, timestamp: m.timestamp,
+    }));
+    classifierHistory.push({ role: 'me', text: aggregatedText, timestamp: burstTimestamp });
+    const newMsg = classifierHistory[classifierHistory.length - 1];
+    const inConflict = crisisResult?.crisisActive ?? false;
+
+    const perMessageCodes = classifyMessage(newMsg, { history: classifierHistory, inConflict });
+    for (const code of perMessageCodes) {
+      processLiveEvent(code, { timestamp: burstTimestamp, inConflict });
+    }
+
+    const WINDOW_24H = 24 * 60 * 60 * 1000;
+    const window24h = classifierHistory.filter((m) => burstTimestamp - m.timestamp <= WINDOW_24H);
+    const horsemenCodes = classifyHorsemenPatterns(window24h);
+    for (const code of horsemenCodes) {
+      processLiveEvent(code, { timestamp: burstTimestamp, inConflict: true });
+    }
+
+    const allCodes = Array.from(new Set([...perMessageCodes, ...horsemenCodes]));
+    runDetectionAndRoute(allCodes, aggregatedText, burstTimestamp);
+  }, [crisisResult?.crisisActive, processLiveEvent, runDetectionAndRoute]);
+
   // ── Core send pipeline (called after intercept check passes) ─────────────────
   const doSend = useCallback((text: string) => {
     setInputText('');
@@ -2069,25 +2178,13 @@ function ChatRoomView({
       runCrisisAnalysis(snapshot);
     }
 
-    // ── DNA 일치율 v2.2 실시간 틱 파이프라인: 실제 커플 채팅(룸1)만 점수에 반영 ──
+    // ── Twin Response Logic §1 (경로 B): 2.5초 입력 버퍼링 후 1회 탐지 호출 ──────
+    // 실제 커플 채팅(룸1)만 v2.2 일치율 점수 + 개입 엔진에 반영한다.
     if (roomType === 'partner') {
-      const classifierHistory: ClassifierMessage[] = [...chatHistoryRef.current, { id: `u-${now}`, role: 'user', text, timestamp: now, type: 'normal' } as Message]
-        .filter((m) => m.type === 'normal')
-        .map((m) => ({ role: m.role === 'user' ? 'me' : 'partner', text: m.text, timestamp: m.timestamp }));
-      const newMsg = classifierHistory[classifierHistory.length - 1];
-      const inConflict = crisisResult?.crisisActive ?? false;
-
-      const perMessageCodes = classifyMessage(newMsg, { history: classifierHistory, inConflict });
-      for (const code of perMessageCodes) {
-        processLiveEvent(code, { timestamp: now, inConflict });
-      }
-
-      const WINDOW_24H = 24 * 60 * 60 * 1000;
-      const window24h = classifierHistory.filter((m) => now - m.timestamp <= WINDOW_24H);
-      const horsemenCodes = classifyHorsemenPatterns(window24h);
-      for (const code of horsemenCodes) {
-        processLiveEvent(code, { timestamp: now, inConflict: true });
-      }
+      if (detectionPendingTexts.current.length === 0) detectionBurstStartRef.current = now;
+      detectionPendingTexts.current.push(text);
+      if (detectionBufferTimer.current) clearTimeout(detectionBufferTimer.current);
+      detectionBufferTimer.current = setTimeout(flushDetectionBuffer, REALTIME_BUFFER_MS);
     }
 
     if (!config.isReal && gap > 200 && gap < 10_000 && privacyLevel === 3) {
@@ -2102,7 +2199,7 @@ function ChatRoomView({
       pendingMessages.current = [];
       triggerAIReply(batch);
     }, profileRef.current.burstInterval);
-  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState, runCrisisAnalysis, crisisResult?.crisisActive, processLiveEvent]);
+  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState, runCrisisAnalysis, flushDetectionBuffer]);
 
   // ── [Step #20] Sensitive intercept → modal → [force send] or [revise] ────────
   const handleSend = useCallback(() => {

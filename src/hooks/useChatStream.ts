@@ -81,6 +81,7 @@ export interface ChatStreamReturn {
   validateMessageSensitivity: (text: string) => SensitiveInterceptResult | null;
   dismissToneAlert: (id: string) => void;
   clearDeadlockNudge: () => void;
+  pushToneAlert: (alert: Omit<ToneAlert, 'id' | 'timestamp'>) => void;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -191,6 +192,17 @@ export function useChatStream(): ChatStreamReturn {
 
   const clearDeadlockNudge = useCallback(() => setDeadlockNudge(null), []);
 
+  // ── Twin Response Logic — ADVISE 채널 진입점 ────────────────────────────────
+  // v2.2 이벤트 코드 기반 개입 엔진(twinResponseEngine)이 생성한 대안 문구를
+  // 기존 말투 가이드 배너(ToneGuidePopup) 큐에 그대로 얹는다. 룸 1에서 발생한
+  // 감지가 룸 2 진입 시 노출되는 기존 크로스룸 동작을 그대로 재사용한다.
+  const pushToneAlert = useCallback((alert: Omit<ToneAlert, 'id' | 'timestamp'>) => {
+    setPendingToneAlerts((prev) => [
+      ...prev.slice(-4),
+      { ...alert, id: `advise-${Date.now()}`, timestamp: Date.now() },
+    ]);
+  }, []);
+
   return {
     pendingToneAlerts,
     sensitiveWarning,
@@ -200,5 +212,6 @@ export function useChatStream(): ChatStreamReturn {
     validateMessageSensitivity,
     dismissToneAlert,
     clearDeadlockNudge,
+    pushToneAlert,
   };
 }

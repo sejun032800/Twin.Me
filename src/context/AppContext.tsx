@@ -59,8 +59,17 @@ import {
   clearMatchEngineState,
   type ScoreHistoryEntry,
 } from '../services/matchEngineStore';
+import {
+  evaluateGate,
+  createGateState,
+  type GateState,
+  type GateContext,
+  type Detection,
+  type SelfAiNotifyItem,
+} from '../engine/twinResponseEngine';
 
 export type { ScoreHistoryEntry };
+export type { Detection, SelfAiNotifyItem };
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
@@ -291,6 +300,13 @@ interface AppContextValue {
   // Cross-tab: 홈 탭 CRITICAL_LOSS 배너 → 채팅 탭 FUN-CHA-003 강제 트리거
   triggerMirrorMode: boolean;
   setTriggerMirrorMode: (v: boolean) => void;
+  // ── 트윈 AI 응답 생성 엔진 (Twin Response Logic) ──────────────────────────
+  // 개입 점수 I(u) → 발화 게이트(θ=0.12) → 채널 라우팅(WARN/ADVISE/NOTIFY) →
+  // 피로도(EMA)/쿨다운 판정까지 한 번에 수행하고 Detection(또는 null)을 반환한다.
+  evaluateIntervention: (code: EventCode, ctx?: GateContext) => Detection | null;
+  // NOTIFY 채널 산출물(사후 인정 발화·배치 요약) 큐 — 룸 2/3이 마운트될 때 드레인한다.
+  selfAiNotifyQueue: SelfAiNotifyItem[];
+  setSelfAiNotifyQueue: React.Dispatch<React.SetStateAction<SelfAiNotifyItem[]>>;
   // FUN-HIS-005: AI 뮤즈에서 선택한 전역 OOTD/무드 — 무드 피드 필터링에 구독됨
   currentOOTD: string | null;
   setCurrentOOTD: (v: string | null) => void;
@@ -475,6 +491,9 @@ const AppContext = createContext<AppContextValue>({
   processLiveEvent: () => {},
   triggerMirrorMode: false,
   setTriggerMirrorMode: () => {},
+  evaluateIntervention: () => null,
+  selfAiNotifyQueue: [],
+  setSelfAiNotifyQueue: () => {},
   currentOOTD: null,
   setCurrentOOTD: () => {},
   currentMood: null,
@@ -550,6 +569,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const freqStateRef = React.useRef<FrequencyState>(createFrequencyState());
   const dailyStatusHistoryRef = React.useRef<OverflowStatus[]>([]);
   const lastSettledDayRef = React.useRef<string>(todayKey());
+  // ── 트윈 AI 응답 생성 엔진 상태 (피로도 EMA/쿨다운/반복패턴 로그 — 비-리액티브) ──
+  const gateStateRef = React.useRef<GateState>(createGateState());
+  const [selfAiNotifyQueue, setSelfAiNotifyQueue] = useState<SelfAiNotifyItem[]>([]);
   const matchEngineHydratedRef = React.useRef<boolean>(false);
   // FUN-REP-003: 커플 Wrapped 데이터 소스
   const scoreHistoryRef = React.useRef<ScoreHistoryEntry[]>([]);
@@ -791,6 +813,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSLive(computeSLive(sTodayOpen, aRef.current, capPlus));
   }, [overflowStatus, crisisMemoryActive, sTodayOpen]);
 
+  // ── 트윈 AI 응답 생성 엔진: 개입 게이트 판정 (채팅 탭 실시간 스트림이 호출) ──
+  const evaluateIntervention = React.useCallback((code: EventCode, ctx: GateContext = {}): Detection | null => {
+    const { detection, nextState } = evaluateGate(code, gateStateRef.current, ctx);
+    gateStateRef.current = nextState;
+    return detection;
+  }, []);
+
   // 인터뷰 완료 시 +5.0% 가산점 즉시 currentScore에 누적
   useEffect(() => {
     if (hasCompletedInterview && interviewBonus === 0) {
@@ -864,6 +893,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     dailyStatusHistoryRef.current = [];
     lastSettledDayRef.current = todayKey();
     setTriggerMirrorMode(false);
+    gateStateRef.current = createGateState();
+    setSelfAiNotifyQueue([]);
     setCurrentOOTD(null);
     setCurrentMood(null);
     setPlanLayers([]);
@@ -923,6 +954,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     lastSettledDayRef.current = todayKey();
     clearMatchEngineState();
     setTriggerMirrorMode(false);
+    gateStateRef.current = createGateState();
+    setSelfAiNotifyQueue([]);
     setCurrentOOTD(null);
     setCurrentMood(null);
     setPlanLayers([]);
@@ -1060,6 +1093,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         processLiveEvent,
         triggerMirrorMode,
         setTriggerMirrorMode,
+        evaluateIntervention,
+        selfAiNotifyQueue,
+        setSelfAiNotifyQueue,
         currentOOTD,
         setCurrentOOTD,
         currentMood,

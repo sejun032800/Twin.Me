@@ -415,3 +415,90 @@ export async function requestToneRegeneration(
     clearTimeout(timeoutHandle);
   }
 }
+
+// ── Twin Response Logic — 채널별 생성 파이프라인 (WARN/ADVISE/NOTIFY) ────────
+//
+// twinResponseEngine.evaluateGate()가 산출한 Detection을 실제 유저-대면 문장으로
+// 변환한다. 페르소나(User_Tone_Vector)는 buildPersonaSystemPrompt를 그대로 재사용
+// 하여 말투 복제 규칙·웰빙 가드레일·프라이버시 화살표 원칙을 상속받고, 채널별
+// 톤 가이드만 추가로 주입한다.
+
+export type TwinResponseChannel = 'WARN' | 'ADVISE' | 'NOTIFY';
+
+function buildChannelToneGuide(channel: TwinResponseChannel, eventLabel: string, mustAffirmSoon: boolean): string {
+  const lines: string[] = ['', `## [TWIN_RESPONSE_CHANNEL: ${channel}] 감지된 이벤트: ${eventLabel}`];
+
+  if (channel === 'WARN') {
+    lines.push(
+      '- 짧고 묵직하게 딱 한 문장으로, 지금 이 행동/버릇 하나만 지적하세요.',
+      '- 절대 가혹하거나 인격을 몰아붙이지 마세요.',
+    );
+  } else if (channel === 'ADVISE') {
+    lines.push(
+      '- 드립과 웃음을 살짝 섞어 친근하게, 무시해도 되는 가벼운 넛지로 전하세요.',
+      '- 방금 내가 쓴 문장을 대체할 수 있는 더 나은 대안 표현 1개를 반드시 포함하세요.',
+      '- 강요하지 말고, "이렇게 해보는 건 어때?" 정도의 제안 톤을 유지하세요.',
+    );
+  } else {
+    lines.push(
+      '- 짧고 유쾌하게 방금의 좋은 행동 하나를 진심으로 인정/칭찬하세요.',
+      '- 1문장, 이모지 1개 이내로 가볍게 마무리하세요.',
+    );
+  }
+
+  if (mustAffirmSoon) {
+    lines.push(
+      '',
+      '## [균형 의무: BALANCE_OBLIGATION]',
+      '- 최근 경고/권고가 연속으로 누적되었습니다. 지적과 별개로, 잘하고 있는 부분에 대한',
+      '  진심 어린 인정 한 마디를 이번 답변에 반드시 함께 포함하세요.',
+    );
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * WARN/ADVISE/NOTIFY 채널에 맞춰 짧은 트윈 발화를 생성한다.
+ * originalText는 방금 유저가 실제로 쓴 문장(ADVISE의 대안 제시 근거)이다.
+ * Never throws — 실패 시 채널에 맞는 안전한 폴백 문자열을 반환한다.
+ */
+export async function generateTwinResponse(
+  channel: TwinResponseChannel,
+  eventLabel: string,
+  originalText: string,
+  ctx: SelfAiContext,
+  mustAffirmSoon = false,
+): Promise<string> {
+  const systemPrompt = buildPersonaSystemPrompt({ ...ctx, roomType: 'ai' }) + buildChannelToneGuide(channel, eventLabel, mustAffirmSoon);
+  const messages: ChatHistoryItem[] = [
+    { role: 'user', content: `방금 내가 쓴 문장: "${originalText}"\n위 채널 지침에 맞춰 한 마디 해줘.` },
+  ];
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    if (API_BASE) {
+      return await withTimeout(
+        callBackendProxy(systemPrompt, messages, controller.signal, ctx.isRoomEarlyMode),
+        TIMEOUT_MS,
+      );
+    }
+    if (ANTHROPIC_KEY) {
+      return await withTimeout(
+        callClaudeDirectly(systemPrompt, messages, controller.signal),
+        TIMEOUT_MS,
+      );
+    }
+    return FALLBACK_ERROR;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === 'LLM_TIMEOUT' || msg.includes('abort') || msg.includes('AbortError')) {
+      return FALLBACK_TIMEOUT;
+    }
+    return FALLBACK_ERROR;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}

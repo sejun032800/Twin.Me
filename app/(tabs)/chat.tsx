@@ -163,8 +163,9 @@ function calcBubbleDelay(text: string, profile: ChatStyleProfile): number {
 // ─── Early Dating Mode — Prompt System (Step #16) ────────────────────────────
 
 const EARLY_DATING_SYSTEM_MODIFIER =
-  '[SYSTEM_MODIFIER: EARLY_DATING_MODE = TRUE. 상대방에게 답변을 제안하거나 코칭할 때, ' +
-  '아직은 서로 조심스럽고 설레는 문체, 예의를 지키되 위트 있는 톤앤매너를 유지할 것]';
+  '[SYSTEM_MODIFIER: EARLY_DATING_MODE = TRUE. 자기반성 피드백 시 연애 초기의 설레는 분위기를 고려하여, ' +
+  '지나치게 몰아붙이지 말고 따뜻하고 부드럽게 성장을 유도하는 톤앤매너를 유지할 것. ' +
+  '연인에게 보낼 메시지를 대신 써주거나 연인을 흉내 내지 말 것]';
 
 export function buildSystemModifier(isEarlyDatingMode: boolean): string {
   return isEarlyDatingMode ? EARLY_DATING_SYSTEM_MODIFIER : '';
@@ -195,7 +196,7 @@ function TypingIndicator({ partnerName, t, isAnalyzing }: { partnerName: string;
   return (
     <View style={styles.typingWrapper}>
       <Text style={[styles.typingLabel, { color: t.textMuted }]}>
-          {isAnalyzing ? '트윈이가 내 생각을 분석 중이에요... 🔮' : `${partnerName} AI가 말하는 중...`}
+          {isAnalyzing ? '거울이 내 말버릇을 들여다보는 중... 🔮' : '트윈이 내 말투로 답하는 중... 🪞'}
         </Text>
       <View style={[styles.typingBubble, { backgroundColor: t.bubbleAI, borderColor: t.isLight ? 'rgba(180,140,200,0.3)' : '#4C2B8A' }]}>
         <Animated.View style={[styles.dot, s1]} />
@@ -1591,7 +1592,7 @@ function ChatRoomView({
 
   const roomConfig = {
     partner: { name: partnerName, emoji: '❤️', badge: null as string | null, status: '실제 연인 채팅방', isReal: true },
-    ai: { name: `${partnerName} AI`, emoji: '💜', badge: 'AI' as string | null, status: '트윈 AI · 말투 학습 완료', isReal: false },
+    ai: { name: '트윈 (나의 분신)', emoji: '🪞', badge: '🪞' as string | null, status: '자기복제 거울 · 내 말투로 나를 성장시킴', isReal: false },
     analyst: { name: '연애 분석가 트윈이', emoji: '🔬', badge: 'AI' as string | null, status: '갈등 감지 · 관계 리포트 전문', isReal: false },
   };
   const config = roomConfig[roomType];
@@ -1621,7 +1622,7 @@ function ChatRoomView({
         role: 'ai',
         type: 'normal',
         timestamp: Date.now(),
-        text: `안녕하세요! 저는 ${partnerName || '연인'}의 말투를 학습한 트윈이에요. 연인에게 보낼 메시지를 저한테 먼저 써보세요 💌`,
+        text: '나야, 너. 오늘 연인과의 대화 좀 봤어. 솔직하게 말해줄게... 🪞 뭐 물어볼 거 있어?',
       };
   const listData = messages.length === 0 ? [welcomeMsg] : messages;
   const [inputText, setInputText] = useState('');
@@ -2168,7 +2169,7 @@ function ChatRoomView({
             )}
           </View>
           <View>
-            <Text style={[styles.headerName, { color: t.text }]}>{config.name}{roomType === 'ai' ? ' ⚡' : ''}</Text>
+            <Text style={[styles.headerName, { color: t.text }]}>{config.name}</Text>
             <Text style={[styles.headerStatus, { color: t.textMuted }]}>{config.status}</Text>
           </View>
         </View>
@@ -2421,10 +2422,11 @@ function PartnerGlowAvatar({ emoji, t }: { emoji: string; t: ThemeTokens }) {
 // ─── DM Row ───────────────────────────────────────────────────────────────────
 
 function DMRow({
-  emoji, name, badge, preview, time, onPress, t, isPartner, alertCount,
+  emoji, name, badge, preview, time, onPress, t, isPartner, alertCount, avatarUri, mirrorAvatar,
 }: {
   emoji: string; name: string; badge?: string; preview: string; time: string;
   onPress: () => void; t: ThemeTokens; isPartner?: boolean; alertCount?: number;
+  avatarUri?: string; mirrorAvatar?: boolean;
 }) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -2439,13 +2441,17 @@ function DMRow({
         <View style={styles.dmAvatarWrap}>
           {isPartner ? (
             <PartnerGlowAvatar emoji={emoji} t={t} />
+          ) : avatarUri ? (
+            <View style={[styles.dmAvatar, { backgroundColor: t.card, borderColor: mirrorAvatar ? '#BC84EE' : (t.isLight ? 'rgba(180,140,200,0.4)' : 'rgba(124,58,237,0.3)'), borderWidth: mirrorAvatar ? 2 : 1.5, overflow: 'hidden' }]}>
+              <Image source={{ uri: avatarUri }} style={[styles.dmAvatarImg, mirrorAvatar ? { transform: [{ scaleX: -1 }] } : undefined]} />
+            </View>
           ) : (
             <View style={[styles.dmAvatar, { backgroundColor: t.card, borderColor: t.isLight ? 'rgba(180,140,200,0.4)' : 'rgba(124,58,237,0.3)' }]}>
               <Text style={styles.dmAvatarEmoji}>{emoji}</Text>
             </View>
           )}
           {badge && (
-            <View style={styles.dmBadge}><Text style={styles.dmBadgeText}>{badge}</Text></View>
+            <View style={[styles.dmBadge, mirrorAvatar ? styles.dmBadgeMirror : undefined]}><Text style={styles.dmBadgeText}>{badge}</Text></View>
           )}
           {(alertCount ?? 0) > 0 && (
             <View style={styles.alertCountBadge}>
@@ -2472,7 +2478,7 @@ function DMListView({
 }: {
   partnerName: string; onEnterRoom: (room: RoomType) => void; t: ThemeTokens; toneAlertCount: number;
 }) {
-  const { isEarlyDatingMode, setIsEarlyDatingMode } = useAppContext();
+  const { isEarlyDatingMode, setIsEarlyDatingMode, myProfile } = useAppContext();
   const { shouldShow, markDone } = useTutorialGuard('chat');
 
   const refPartnerRow = useRef<View>(null);
@@ -2490,8 +2496,8 @@ function DMListView({
     },
     {
       targetRef: refAiRow,
-      title: '💜 파트너 AI',
-      description: '파트너의 말투와 성격을 학습한 AI가 대신 답장 초안을 생성해요.',
+      title: '🪞 나의 트윈 (거울)',
+      description: '내 말투와 습관을 학습한 AI가 나를 있는 그대로 비추어 성장을 도와요.',
       arrowDir: 'below',
       pad: 10,
     },
@@ -2534,10 +2540,12 @@ function DMListView({
         <View ref={refAiRow} collapsable={false}>
           <Animated.View entering={FadeInRight.delay(100).duration(300)}>
             <DMRow
-              emoji="💜" name={`${partnerName} AI`} badge="AI"
-              preview={`안녕~ 나야 ${partnerName} AI ⚡ 보고 싶었어 🥺`} time="방금"
+              emoji="🪞" name="트윈 (나의 분신)" badge="🪞"
+              preview="솔직하게 말해줄게. 오늘 네 말투 좀 봤거든... 💬" time="방금"
               onPress={() => onEnterRoom('ai')} t={t}
               alertCount={toneAlertCount > 0 ? toneAlertCount : undefined}
+              avatarUri={myProfile.avatarUrl}
+              mirrorAvatar
             />
           </Animated.View>
         </View>
@@ -2556,7 +2564,7 @@ function DMListView({
 
       <View ref={refTipBox} collapsable={false} style={styles.tipBox}>
         <Text style={styles.tipText}>
-          ✨ 연인에게 더 예쁜 말을 전하고 싶을 때, 트윈이한테 먼저 써봐요.
+          🪞 나 자신을 더 잘 알고 싶을 때, 거울 트윈이한테 물어봐요.
         </Text>
       </View>
 
@@ -2639,6 +2647,8 @@ const styles = StyleSheet.create({
   partnerGlowRing: { width: 52, height: 52, borderRadius: 26, padding: 2.5 },
   partnerGlowInner: { flex: 1, borderRadius: 23.5, alignItems: 'center', justifyContent: 'center' },
   dmBadge: { position: 'absolute', bottom: -2, right: -4, backgroundColor: Colors.BADGE_AI_BLUE, borderRadius: 6, paddingHorizontal: 4, paddingVertical: 1 },
+  dmBadgeMirror: { backgroundColor: '#7C3AED' },
+  dmAvatarImg: { width: 48, height: 48, borderRadius: 22 },
   dmBadgeText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },
   alertCountBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
   alertCountText: { fontSize: 8, fontWeight: FontWeight.bold, color: '#fff' },

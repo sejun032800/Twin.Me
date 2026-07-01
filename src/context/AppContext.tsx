@@ -307,6 +307,9 @@ interface AppContextValue {
   resetSession: () => void;
   // Purges ALL user data to empty defaults — used by account deletion pipeline
   purgeAccount: () => void;
+  // SRS 보강판 #1 §B.5: 커플 연결만 해제 — 공유 메모리(추억/스코어)는 유예(Grace)
+  // 기간 동안 보존되며 purgeAccount처럼 개인 데이터를 지우지 않음
+  unlinkCouple: () => void;
   // ── Map Layer System (FUN-HIS-006) ─────────────────────────────────────────
   planLayers: MapLayer[];
   layerVisibility: Record<string, boolean>; // key → false means hidden; undefined/true = visible
@@ -478,6 +481,7 @@ const AppContext = createContext<AppContextValue>({
   setCurrentMood: () => {},
   resetSession: () => {},
   purgeAccount: () => {},
+  unlinkCouple: () => {},
   planLayers: [],
   layerVisibility: {},
   secretCourses: [],
@@ -928,6 +932,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUserAccount(DEFAULT_USER_ACCOUNT);
   };
 
+  // SRS 보강판 #1 §B.5 — 우아한 해지(Churn): 커플 연결만 끊는다.
+  // purgeAccount와 달리 개인 학습 데이터(myProfile/trainingResult/chatStyleProfile 등)와
+  // 공유 아카이브(dateCourses/galleryPhotos/memorySentences/highlightCards/scoreHistory)는
+  // 즉시 지우지 않고 유예(Grace) 기간 동안 보존한다 — 실제 만료 처리는 서버 스케줄러가
+  // requestCoupleUnlinkToServer() 호출 시점을 기준으로 수행(placeholder, TODO 서버 연동).
+  const unlinkCouple = () => {
+    setCoupleId(null);
+    setInviteCode('');
+    setPartnerProfile({ name: '', gender: '', mbti: '' });
+    setCoupleInfoState({ startedAt: null });
+    setRoomEarlyModeState({});
+    setPartnerAiMood([]);
+    setPartnerSensitiveConfig(DEFAULT_PARTNER_SENSITIVE_CONFIG);
+    setWeeklyReportData(null);
+    setPendingGiftCard(null);
+    setOneTimeHighlightUnlocked(false);
+    // 구독은 Couple_ID 단위 엔타이틀먼트이므로 연결 해제 시 개인 상태로 리셋
+    setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+  };
+
   const themeTokens = themeMode === 'light' ? LIGHT_THEME : DARK_THEME;
 
   // Hydrate persisted highlight cards from AsyncStorage on app launch (Step #53)
@@ -1042,6 +1066,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCurrentMood,
         resetSession,
         purgeAccount,
+        unlinkCouple,
         planLayers,
         layerVisibility,
         secretCourses,

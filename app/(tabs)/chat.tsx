@@ -44,6 +44,7 @@ import { requestSelfAiLlmResponse, requestToneRegeneration, type ChatHistoryItem
 import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
 import { useReportScheduler } from '../../src/hooks/useReportScheduler';
 import { useCrisisIntelligence, CrisisMessage, CrisisAnalysisResult } from '../../src/hooks/useCrisisIntelligence';
+import { classifyMessage, classifyHorsemenPatterns, type ClassifierMessage } from '../../src/engine/eventClassifier';
 import { WeeklyReportModal, ReportCardBubble } from '../../src/components/chat/WeeklyReportModal';
 import {
   initChatroomRealtimeSocket,
@@ -68,7 +69,7 @@ import { PASTEL_PINK_THEME_ID, PastelPinkGradients, PastelPinkTokens } from '../
 
 type RoomType = 'partner' | 'ai' | 'analyst';
 type MessageRole = 'user' | 'ai';
-type MessageType = 'normal' | 'nudge' | 'report_card' | 'image' | 'video' | 'location' | 'gift';
+type MessageType = 'normal' | 'nudge' | 'report_card' | 'image' | 'video' | 'location' | 'gift' | 'premium_gift';
 type ToneFeedback = 'too_warm' | 'too_cold' | 'no_humor';
 
 interface ToneWeight { warmth: number; humor: number }
@@ -95,6 +96,8 @@ interface Message {
   giftName?: string;
   giftEmoji?: string;
   giftPrice?: string;
+  // FUN-PAY-001 §2: 프리미엄 선물 카드
+  premiumPlanLabel?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -850,6 +853,46 @@ function GiftBubble({
   );
 }
 
+// ─── FUN-PAY-001 §2: 프리미엄 선물 카드 ────────────────────────────────────────
+
+function PremiumGiftBubble({
+  planLabel, role, senderName,
+}: {
+  planLabel: string; role: MessageRole; senderName: string;
+}) {
+  const isUser = role === 'user';
+  const glowOpacity = useSharedValue(0.55);
+
+  useEffect(() => {
+    glowOpacity.value = withRepeat(
+      withSequence(withTiming(1, { duration: 900 }), withTiming(0.55, { duration: 900 })),
+      -1, false,
+    );
+  }, [glowOpacity]);
+
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
+
+  return (
+    <View style={[styles.giftBubbleWrap, isUser ? styles.giftBubbleWrapUser : styles.giftBubbleWrapAI]}>
+      <LinearGradient
+        colors={['#F59E0B', '#D946EF', '#7C3AED']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.giftBubbleGradBorder}
+      >
+        <View style={styles.giftBubbleInner}>
+          <Animated.View style={[StyleSheet.absoluteFill, styles.giftBubbleGlow, glowStyle]} />
+          <Text style={styles.giftBubbleEmoji}>💎</Text>
+          <Text style={styles.giftBubbleTitle}>
+            {isUser ? '나' : senderName}님이 프리미엄을 선물했어요 💝
+          </Text>
+          <Text style={styles.giftBubbleName}>{planLabel}</Text>
+          <Text style={styles.giftBubblePrice}>우리 커플 전체에 즉시 적용됐어요 ✨</Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
 // ─── [Step #17] Gift Catalog Sheet ───────────────────────────────────────────
 
 function GiftCatalogSheet({
@@ -1418,6 +1461,19 @@ function MessageBubble({
     );
   }
 
+  // Premium gift bubble (FUN-PAY-001 §2)
+  if (message.type === 'premium_gift' && message.premiumPlanLabel) {
+    return (
+      <Animated.View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAI, animStyle]}>
+        <PremiumGiftBubble
+          planLabel={message.premiumPlanLabel}
+          role={message.role}
+          senderName={partnerName}
+        />
+      </Animated.View>
+    );
+  }
+
   // Normal text bubble
   const userBg = t.isLight ? '#E8E0F5' : Colors.CARD_DARK_SLATE;
   const userTxt = t.isLight ? '#2D1B69' : Colors.TEXT_ON_DARK;
@@ -1579,6 +1635,10 @@ function ChatRoomView({
     setLastKakaoSyncTimestamp,
     triggerMirrorMode,
     setTriggerMirrorMode,
+    processLiveEvent,
+    rapidSwingActive,
+    pendingGiftCard,
+    setPendingGiftCard,
   } = useAppContext();
 
   // Step #40: derive deep inference flag from subscription plan
@@ -1670,17 +1730,20 @@ function ChatRoomView({
     ),
   }));
 
-  // Step #23: watch LLM-computed crisis score — fire modal once per crisis episode
+  // Step #23: watch LLM-computed crisis score — fire modal once per crisis episode.
+  // v2.2 §4.3.3 Rapid-Swing: 30분 내 A_t가 −1.5 미만 급락하면 임계값을 낮춰
+  // (crisisActive만으로도) 강제 발동시켜 민감도를 상향한다.
   useEffect(() => {
-    if (crisisResult?.crisisModalTrigger && !crisisModalShownRef.current) {
+    const rapidSwingForce = rapidSwingActive && (crisisResult?.crisisActive ?? false);
+    if ((crisisResult?.crisisModalTrigger || rapidSwingForce) && !crisisModalShownRef.current) {
       crisisModalShownRef.current = true;
       triggerHaptic(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); });
       setTimeout(() => setCrisisVisible(true), 600);
     }
-    if (!crisisResult?.crisisModalTrigger) {
+    if (!crisisResult?.crisisModalTrigger && !rapidSwingForce) {
       crisisModalShownRef.current = false;
     }
-  }, [crisisResult?.crisisModalTrigger]);
+  }, [crisisResult?.crisisModalTrigger, crisisResult?.crisisActive, rapidSwingActive]);
 
   // FUN-HOM-002 크로스 탭 라우팅: 홈 오버플로우 CRITICAL_LOSS 배너 → FUN-CHA-003 강제 발동
   useEffect(() => {
@@ -1690,6 +1753,23 @@ function ChatRoomView({
       setTimeout(() => setCrisisVisible(true), 400);
     }
   }, [triggerMirrorMode]);
+
+  // FUN-PAY-001 §2 크로스 탭 라우팅: 설정 탭 선물 완료 → 파트너 룸에 선물 카드 렌더링
+  useEffect(() => {
+    if (pendingGiftCard && roomType === 'partner') {
+      const planLabel = pendingGiftCard.planId === 'deep' ? 'Deep Talk Night 🌙' : 'Coffee Break ☕';
+      setPendingGiftCard(null);
+      triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+      addMessage({
+        id: `gift-premium-${pendingGiftCard.giftedAt}`,
+        role: 'user',
+        text: '',
+        timestamp: pendingGiftCard.giftedAt,
+        type: 'premium_gift',
+        premiumPlanLabel: planLabel,
+      });
+    }
+  }, [pendingGiftCard, roomType]);
 
   const addMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -1989,6 +2069,27 @@ function ChatRoomView({
       runCrisisAnalysis(snapshot);
     }
 
+    // ── DNA 일치율 v2.2 실시간 틱 파이프라인: 실제 커플 채팅(룸1)만 점수에 반영 ──
+    if (roomType === 'partner') {
+      const classifierHistory: ClassifierMessage[] = [...chatHistoryRef.current, { id: `u-${now}`, role: 'user', text, timestamp: now, type: 'normal' } as Message]
+        .filter((m) => m.type === 'normal')
+        .map((m) => ({ role: m.role === 'user' ? 'me' : 'partner', text: m.text, timestamp: m.timestamp }));
+      const newMsg = classifierHistory[classifierHistory.length - 1];
+      const inConflict = crisisResult?.crisisActive ?? false;
+
+      const perMessageCodes = classifyMessage(newMsg, { history: classifierHistory, inConflict });
+      for (const code of perMessageCodes) {
+        processLiveEvent(code, { timestamp: now, inConflict });
+      }
+
+      const WINDOW_24H = 24 * 60 * 60 * 1000;
+      const window24h = classifierHistory.filter((m) => now - m.timestamp <= WINDOW_24H);
+      const horsemenCodes = classifyHorsemenPatterns(window24h);
+      for (const code of horsemenCodes) {
+        processLiveEvent(code, { timestamp: now, inConflict: true });
+      }
+    }
+
     if (!config.isReal && gap > 200 && gap < 10_000 && privacyLevel === 3) {
       applyRollingAverage(maskPII(text), gap);
     }
@@ -2001,7 +2102,7 @@ function ChatRoomView({
       pendingMessages.current = [];
       triggerAIReply(batch);
     }, profileRef.current.burstInterval);
-  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState]);
+  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState, runCrisisAnalysis, crisisResult?.crisisActive, processLiveEvent]);
 
   // ── [Step #20] Sensitive intercept → modal → [force send] or [revise] ────────
   const handleSend = useCallback(() => {

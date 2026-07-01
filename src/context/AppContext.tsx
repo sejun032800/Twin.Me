@@ -22,18 +22,45 @@ import type { WeeklyReportData } from '../services/weeklyReportService';
 import { seedReviewStore } from '../services/partnerReviewService';
 import {
   type SubscriptionStatus,
+  type PlanId,
   DEFAULT_SUBSCRIPTION_STATUS,
 } from '../services/iapService';
+import {
+  broadcastCoupleEntitlement,
+  subscribeToCoupleEntitlement,
+} from '../services/coupleEntitlementService';
 import type { KakaoSyncRecord } from '../services/kakaoUploadService';
 import type { HighlightCard } from '../services/kakaoHighlightService';
 import { loadHighlightCards } from '../services/kakaoHighlightService';
 import {
-  type MicroEventCode,
   type OverflowStatus,
-  computeDailyDelta,
-  applyScoreDelta,
   computeMasterBase,
 } from '../utils/scoreCalculator';
+import {
+  type EventCode,
+  type EventContext as MatchEventContext,
+  type OverflowSeverity,
+  type ATick,
+  type LoggedEvent,
+  type FrequencyState,
+  processTick,
+  createFrequencyState,
+  computeSLive,
+  settleMidnight,
+  detectRapidSwing,
+  detectCombos,
+  shouldActivateCrisisMemory,
+  resolveActiveCapPlus,
+  todayKey,
+} from '../engine/metrics';
+import {
+  loadMatchEngineState,
+  saveMatchEngineState,
+  clearMatchEngineState,
+  type ScoreHistoryEntry,
+} from '../services/matchEngineStore';
+
+export type { ScoreHistoryEntry };
 
 export type { PartnerAiMoodTag };
 export type { PartnerSensitiveConfig };
@@ -43,7 +70,8 @@ export type { SubscriptionStatus };
 export type { ChatStyleProfile };
 export type { KakaoSyncRecord };
 export type { HighlightCard };
-export type { MicroEventCode, OverflowStatus };
+export type { OverflowStatus };
+export type { EventCode, OverflowSeverity };
 export type { Photo, MemoryRing };
 export type { UserAccount, LinkedProvider };
 
@@ -216,6 +244,19 @@ interface AppContextValue {
   // IAP subscription status — updated on successful receipt verification (Step #39)
   subscriptionStatus: SubscriptionStatus;
   setSubscriptionStatus: (status: SubscriptionStatus) => void;
+  // FUN-PAY-001 §1: 커플 단위 엔타이틀먼트 — 결제 직후 호출해 로컬 반영 + 파트너 기기 동기화
+  applyCoupleSubscription: (status: SubscriptionStatus) => Promise<void>;
+  // FUN-PAY-001 §2: 상대에게 프리미엄 선물하기 — 동기화 + 파트너 채팅방 선물 카드 트리거
+  giftPremiumToPartner: (status: SubscriptionStatus) => Promise<void>;
+  // Cross-tab: 설정 탭 선물 완료 → 채팅 탭 파트너 룸에 선물 카드 렌더링
+  pendingGiftCard: { planId: PlanId | null; giftedAt: number } | null;
+  setPendingGiftCard: (v: { planId: PlanId | null; giftedAt: number } | null) => void;
+  // FUN-PAY-001 §3: 실시간 EXCESS_GAIN 단건 결제 모먼트 — 하이라이트 카드 즉시 언락
+  oneTimeHighlightUnlocked: boolean;
+  setOneTimeHighlightUnlocked: (v: boolean) => void;
+  // FUN-REP-003: 커플 Wrapped — 일자별 S_Current 히스토리(최고점 산출) + 회복 서사 누적 횟수
+  scoreHistory: ScoreHistoryEntry[];
+  comboRecoveryCount: number;
   // KakaoTalk incremental sync — AI-selected touching moments (Step #50)
   memorySentences: KakaoSyncRecord[];
   addMemorySentences: (records: KakaoSyncRecord[]) => void;
@@ -225,21 +266,28 @@ interface AppContextValue {
   highlightCards: HighlightCard[];
   setHighlightCards: (cards: HighlightCard[]) => void;
   addHighlightCards: (cards: HighlightCard[]) => void;
-  // ── DNA 일치율 엔진 (Step DNA-Core) ─────────────────────────────────────────
+  // ── DNA 일치율 코어 엔진 v2.2 (Real-Time Pulse Edition) ─────────────────────
   // S_Base: 성격 상성 기반 정규분포 초기 점수
   baseScore: number;
   setBaseScore: (score: number) => void;
   // Bonus_Interview: 10분 음성 인터뷰 가산점 (0.0 ~ 5.0)
   interviewBonus: number;
   setInterviewBonus: (bonus: number) => void;
-  // S_Current: 실시간 가·감산 반영 최종 현재 일치율
+  // S_Current: 자정 1회 정산되어 영구 저장되는 공식 일치율 (10단계 티어·페이월 기준)
   currentScore: number;
   setCurrentScore: (score: number) => void;
-  // 클램프 필터 오버플로우 상태
+  // S_Live: 화면 상단 게이지 전용 실시간 값 (non-persistent, 이벤트마다 즉시 재계산)
+  sLive: number;
+  // 오버플로우 상태(호환용) + 3단계 심각도(MINOR/MAJOR/CRITICAL)
   overflowStatus: OverflowStatus;
   setOverflowStatus: (status: OverflowStatus) => void;
-  // 24개 마이크로 이벤트 일괄 적용 (clamp + overflow 자동 처리)
-  applyDailyEvents: (events: MicroEventCode[]) => void;
+  overflowSeverity: OverflowSeverity;
+  // 3일 연속 CRITICAL_LOSS 위기 메모리 — 활성 시 가산 캡 1.0으로 임시 하향
+  crisisMemoryActive: boolean;
+  // 30분 내 A_t가 −1.5 미만 급락 (Rapid-Swing) — FUN-CHA-003 강제 민감도 상향 트리거
+  rapidSwingActive: boolean;
+  // 실시간 틱 단위 이벤트 처리 파이프라인 (§4.2) — 채팅 메시지 분류기가 호출
+  processLiveEvent: (code: EventCode, ctx?: MatchEventContext) => void;
   // Cross-tab: 홈 탭 CRITICAL_LOSS 배너 → 채팅 탭 FUN-CHA-003 강제 트리거
   triggerMirrorMode: boolean;
   setTriggerMirrorMode: (v: boolean) => void;
@@ -394,6 +442,14 @@ const AppContext = createContext<AppContextValue>({
   addUploadedMedia: () => {},
   subscriptionStatus: DEFAULT_SUBSCRIPTION_STATUS,
   setSubscriptionStatus: () => {},
+  applyCoupleSubscription: async () => {},
+  giftPremiumToPartner: async () => {},
+  pendingGiftCard: null,
+  setPendingGiftCard: () => {},
+  oneTimeHighlightUnlocked: false,
+  setOneTimeHighlightUnlocked: () => {},
+  scoreHistory: [],
+  comboRecoveryCount: 0,
   memorySentences: [],
   addMemorySentences: () => {},
   lastKakaoSyncTimestamp: null,
@@ -407,9 +463,13 @@ const AppContext = createContext<AppContextValue>({
   setInterviewBonus: () => {},
   currentScore: 70.0,
   setCurrentScore: () => {},
+  sLive: 70.0,
   overflowStatus: 'NONE',
   setOverflowStatus: () => {},
-  applyDailyEvents: () => {},
+  overflowSeverity: 'NONE',
+  crisisMemoryActive: false,
+  rapidSwingActive: false,
+  processLiveEvent: () => {},
   triggerMirrorMode: false,
   setTriggerMirrorMode: () => {},
   currentOOTD: null,
@@ -461,15 +521,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [coupleInfo, setCoupleInfoState] = useState<CoupleInfo>({ startedAt: '2024-01-14' });
   const [uploadedMediaCount, setUploadedMediaCount] = useState(0);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>(DEFAULT_SUBSCRIPTION_STATUS);
+  const [pendingGiftCard, setPendingGiftCard] = useState<{ planId: PlanId | null; giftedAt: number } | null>(null);
+  const [oneTimeHighlightUnlocked, setOneTimeHighlightUnlocked] = useState<boolean>(false);
+  const [scoreHistory, setScoreHistory] = useState<ScoreHistoryEntry[]>([]);
+  const [comboRecoveryCount, setComboRecoveryCount] = useState<number>(0);
   const [memorySentences, setMemorySentences] = useState<KakaoSyncRecord[]>([]);
   const [lastKakaoSyncTimestamp, setLastKakaoSyncTimestamp] = useState<string | null>(null);
   const [highlightCards, setHighlightCards] = useState<HighlightCard[]>([]);
-  // ── DNA 일치율 엔진 상태 ─────────────────────────────────────────────────────
+  // ── DNA 일치율 코어 엔진 v2.2 상태 ───────────────────────────────────────────
   const [baseScore, setBaseScore] = useState<number>(70.0);
   const [interviewBonus, setInterviewBonus] = useState<number>(0.0);
   const [currentScore, setCurrentScore] = useState<number>(70.0);
+  const [sLive, setSLive] = useState<number>(70.0);
+  const [sTodayOpen, setSTodayOpen] = useState<number>(70.0);
   const [overflowStatus, setOverflowStatus] = useState<OverflowStatus>('NONE');
+  const [overflowSeverity, setOverflowSeverity] = useState<OverflowSeverity>('NONE');
+  const [crisisMemoryActive, setCrisisMemoryActive] = useState<boolean>(false);
+  const [rapidSwingActive, setRapidSwingActive] = useState<boolean>(false);
   const [triggerMirrorMode, setTriggerMirrorMode] = useState<boolean>(false);
+  // 틱 엔진 비-리액티브 상태 (재렌더 불필요 — S_Live/overflow만 state로 반영)
+  const aRef = React.useRef<number>(0);
+  const aHistoryRef = React.useRef<ATick[]>([]);
+  const recentEventLogRef = React.useRef<LoggedEvent[]>([]);
+  const freqStateRef = React.useRef<FrequencyState>(createFrequencyState());
+  const dailyStatusHistoryRef = React.useRef<OverflowStatus[]>([]);
+  const lastSettledDayRef = React.useRef<string>(todayKey());
+  const matchEngineHydratedRef = React.useRef<boolean>(false);
+  // FUN-REP-003: 커플 Wrapped 데이터 소스
+  const scoreHistoryRef = React.useRef<ScoreHistoryEntry[]>([]);
+  const comboRecoveryCountRef = React.useRef<number>(0);
   // FUN-HIS-005: AI 뮤즈 선택값 — 무드 피드 필터 구독용
   const [currentOOTD, setCurrentOOTD] = useState<string | null>(null);
   const [currentMood, setCurrentMood] = useState<string | null>(null);
@@ -576,12 +656,136 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return [...newOnly, ...prev];
     });
 
-  // 24개 마이크로 이벤트 일괄 적용: clamp delta + overflow 감지 + currentScore 갱신
-  const applyDailyEvents = (events: MicroEventCode[]) => {
-    const { clamped, overflowStatus: newStatus } = computeDailyDelta(events);
-    setOverflowStatus(newStatus);
-    setCurrentScore((prev) => applyScoreDelta(prev, clamped));
-  };
+  // ── v2.2 자정 정산: S_Today_Open → S_Current, 항상성 감쇠 + 위기 메모리 갱신 ──
+  const settleMidnightIfNeeded = React.useCallback(() => {
+    const key = todayKey();
+    if (lastSettledDayRef.current === key) return;
+
+    const sMasterBase = computeMasterBase(baseScore, interviewBonus);
+    const result = settleMidnight(
+      sTodayOpen,
+      aRef.current,
+      sMasterBase,
+      resolveActiveCapPlus(crisisMemoryActive),
+    );
+
+    const nextHistory = [...dailyStatusHistoryRef.current, result.overflowStatus].slice(-3);
+    dailyStatusHistoryRef.current = nextHistory;
+    const nextCrisisMemory = shouldActivateCrisisMemory(nextHistory);
+
+    aRef.current = 0;
+    aHistoryRef.current = [];
+    recentEventLogRef.current = [];
+    freqStateRef.current = createFrequencyState();
+    lastSettledDayRef.current = key;
+
+    // FUN-REP-003: 커플 Wrapped 최고점 일자 산출용 — 최근 400일만 보존
+    const nextScoreHistory = [...scoreHistoryRef.current, { date: key, score: result.sCurrent }].slice(-400);
+    scoreHistoryRef.current = nextScoreHistory;
+
+    setCurrentScore(result.sCurrent);
+    setSTodayOpen(result.sCurrent);
+    setSLive(result.sCurrent);
+    setOverflowStatus(result.overflowStatus);
+    setOverflowSeverity(result.severity);
+    setCrisisMemoryActive(nextCrisisMemory);
+    setRapidSwingActive(false);
+    setScoreHistory(nextScoreHistory);
+
+    saveMatchEngineState({
+      sCurrent: result.sCurrent,
+      sTodayOpen: result.sCurrent,
+      lastSettledDay: key,
+      dailyStatusHistory: nextHistory,
+      crisisMemoryActive: nextCrisisMemory,
+      scoreHistory: nextScoreHistory,
+      comboRecoveryCount: comboRecoveryCountRef.current,
+    });
+  }, [baseScore, interviewBonus, sTodayOpen, crisisMemoryActive]);
+
+  // 앱 구동 중 자정을 넘기는 경우를 잡기 위한 1분 간격 폴링
+  useEffect(() => {
+    const timer = setInterval(settleMidnightIfNeeded, 60_000);
+    return () => clearInterval(timer);
+  }, [settleMidnightIfNeeded]);
+
+  // 앱 최초 구동 시 영속화된 v2.2 엔진 상태 하이드레이션 (Step DNA-Core v2.2)
+  useEffect(() => {
+    loadMatchEngineState().then((persisted) => {
+      matchEngineHydratedRef.current = true;
+      if (!persisted) return;
+      lastSettledDayRef.current = persisted.lastSettledDay;
+      dailyStatusHistoryRef.current = persisted.dailyStatusHistory;
+      setCurrentScore(persisted.sCurrent);
+      setSTodayOpen(persisted.sTodayOpen);
+      setSLive(persisted.sCurrent);
+      setCrisisMemoryActive(persisted.crisisMemoryActive);
+      scoreHistoryRef.current = persisted.scoreHistory ?? [];
+      setScoreHistory(scoreHistoryRef.current);
+      comboRecoveryCountRef.current = persisted.comboRecoveryCount ?? 0;
+      setComboRecoveryCount(comboRecoveryCountRef.current);
+      // 하이드레이션 이후 자정 경과 여부 즉시 재검사
+      settleMidnightIfNeeded();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── FUN-PAY-001 §1: 커플 단위 엔타이틀먼트 실시간 동기화 ──────────────────────
+  useEffect(() => {
+    if (!coupleId) return;
+    const unsubscribe = subscribeToCoupleEntitlement(coupleId, (entitlement) => {
+      setSubscriptionStatus({
+        isPremium: entitlement.isPremium,
+        planId: entitlement.planId,
+        expiresAt: entitlement.expiresAt,
+      });
+    });
+    return unsubscribe;
+  }, [coupleId]);
+
+  // 결제 성공 직후 호출 — 로컬 반영 + Supabase로 파트너 기기에 커플 단위 전파
+  const applyCoupleSubscription = React.useCallback(async (status: SubscriptionStatus) => {
+    setSubscriptionStatus(status);
+    await broadcastCoupleEntitlement(coupleId, status, 'me');
+  }, [coupleId]);
+
+  // FUN-PAY-001 §2: 상대에게 프리미엄 선물하기 — 동기화 + 파트너 채팅방 선물 카드 트리거
+  const giftPremiumToPartner = React.useCallback(async (status: SubscriptionStatus) => {
+    setSubscriptionStatus(status);
+    await broadcastCoupleEntitlement(coupleId, status, 'me');
+    setPendingGiftCard({ planId: status.planId, giftedAt: Date.now() });
+  }, [coupleId]);
+
+  // ── v2.2 실시간 틱 파이프라인: 이벤트 감지 → A_t 누적 → S_Live 즉시 재계산 ──
+  const processLiveEvent = React.useCallback((code: EventCode, ctx: MatchEventContext = {}) => {
+    const now = ctx.timestamp ?? Date.now();
+    const inConflict = overflowStatus === 'CRITICAL_LOSS' || ctx.inConflict;
+
+    const tick = processTick(code, freqStateRef.current, { ...ctx, inConflict });
+    aRef.current += tick.deltaFinal;
+    recentEventLogRef.current = [...recentEventLogRef.current, { code, t: now }].slice(-40);
+
+    // 시퀀스 콤보 (κ·γ 미적용 특례 가산)
+    const combos = detectCombos(recentEventLogRef.current, now);
+    for (const combo of combos) {
+      aRef.current += combo.bonus;
+      // FUN-REP-003: 회복 서사(C-ARC) 콤보 발생 시 커플 Wrapped용 카운터 누적
+      if (combo.code === 'C-ARC-001' || combo.code === 'C-ARC-002') {
+        comboRecoveryCountRef.current += 1;
+        setComboRecoveryCount(comboRecoveryCountRef.current);
+      }
+    }
+
+    aHistoryRef.current = [...aHistoryRef.current, { t: now, aValue: aRef.current }].filter(
+      (h) => now - h.t <= 24 * 60 * 60 * 1000,
+    );
+
+    const swing = detectRapidSwing(aHistoryRef.current, aRef.current, now);
+    setRapidSwingActive(swing);
+
+    const capPlus = resolveActiveCapPlus(crisisMemoryActive);
+    setSLive(computeSLive(sTodayOpen, aRef.current, capPlus));
+  }, [overflowStatus, crisisMemoryActive, sTodayOpen]);
 
   // 인터뷰 완료 시 +5.0% 가산점 즉시 currentScore에 누적
   useEffect(() => {
@@ -631,13 +835,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCoupleInfoState({ startedAt: '2024-01-14' });
     setUploadedMediaCount(0);
     setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+    setPendingGiftCard(null);
+    setOneTimeHighlightUnlocked(false);
+    scoreHistoryRef.current = [];
+    setScoreHistory([]);
+    comboRecoveryCountRef.current = 0;
+    setComboRecoveryCount(0);
     setMemorySentences([]);
     setLastKakaoSyncTimestamp(null);
     setHighlightCards([]);
     setBaseScore(70.0);
     setInterviewBonus(0.0);
     setCurrentScore(70.0);
+    setSLive(70.0);
+    setSTodayOpen(70.0);
     setOverflowStatus('NONE');
+    setOverflowSeverity('NONE');
+    setCrisisMemoryActive(false);
+    setRapidSwingActive(false);
+    aRef.current = 0;
+    aHistoryRef.current = [];
+    recentEventLogRef.current = [];
+    freqStateRef.current = createFrequencyState();
+    dailyStatusHistoryRef.current = [];
+    lastSettledDayRef.current = todayKey();
     setTriggerMirrorMode(false);
     setCurrentOOTD(null);
     setCurrentMood(null);
@@ -672,13 +893,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCoupleInfoState({ startedAt: null });
     setUploadedMediaCount(0);
     setSubscriptionStatus(DEFAULT_SUBSCRIPTION_STATUS);
+    setPendingGiftCard(null);
+    setOneTimeHighlightUnlocked(false);
+    scoreHistoryRef.current = [];
+    setScoreHistory([]);
+    comboRecoveryCountRef.current = 0;
+    setComboRecoveryCount(0);
     setMemorySentences([]);
     setLastKakaoSyncTimestamp(null);
     setHighlightCards([]);
     setBaseScore(0);
     setInterviewBonus(0);
     setCurrentScore(0);
+    setSLive(0);
+    setSTodayOpen(0);
     setOverflowStatus('NONE');
+    setOverflowSeverity('NONE');
+    setCrisisMemoryActive(false);
+    setRapidSwingActive(false);
+    aRef.current = 0;
+    aHistoryRef.current = [];
+    recentEventLogRef.current = [];
+    freqStateRef.current = createFrequencyState();
+    dailyStatusHistoryRef.current = [];
+    lastSettledDayRef.current = todayKey();
+    clearMatchEngineState();
     setTriggerMirrorMode(false);
     setCurrentOOTD(null);
     setCurrentMood(null);
@@ -767,6 +1006,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addUploadedMedia,
         subscriptionStatus,
         setSubscriptionStatus,
+        applyCoupleSubscription,
+        giftPremiumToPartner,
+        pendingGiftCard,
+        setPendingGiftCard,
+        oneTimeHighlightUnlocked,
+        setOneTimeHighlightUnlocked,
+        scoreHistory,
+        comboRecoveryCount,
         memorySentences,
         addMemorySentences,
         lastKakaoSyncTimestamp,
@@ -780,9 +1027,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setInterviewBonus,
         currentScore,
         setCurrentScore,
+        sLive,
         overflowStatus,
         setOverflowStatus,
-        applyDailyEvents,
+        overflowSeverity,
+        crisisMemoryActive,
+        rapidSwingActive,
+        processLiveEvent,
         triggerMirrorMode,
         setTriggerMirrorMode,
         currentOOTD,

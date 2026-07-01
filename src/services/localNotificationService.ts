@@ -10,6 +10,7 @@ import type { HighlightCard } from './kakaoHighlightService';
 
 const DAILY_ID   = 'twin-me-daily-kakao-reminder';
 const WEEKLY_ID  = 'twin-me-weekly-quote-reminder';
+const MASTER_QUESTION_ID = 'twin-me-master-question-tonight';
 
 // ── Permission request ────────────────────────────────────────────────────────
 
@@ -91,6 +92,41 @@ export async function scheduleWeeklyQuoteReminder(
         weekday: 7,   // 토요일 (1=Sun…7=Sat in Expo)
         hour: 9,
         minute: 0,
+      },
+    });
+  } catch {}
+}
+
+// ── FUN-REP-002 §2.1: 그날 밤 마스터 커플 질문 실시간 푸시 ────────────────────
+// 주간 리포트에서 분리되어, 그 감정이 살아있는 당일 밤(기본 21:00)에 1회 발송된다.
+
+export async function scheduleMasterQuestionPush(question: string, hour = 21): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(MASTER_QUESTION_ID);
+  } catch {}
+
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, 0, 0, 0);
+  // 이미 지난 시각이면 5분 뒤 즉시 발송 (그날 밤이 끝나기 전 최대한 살아있는 감정으로 전달)
+  if (target.getTime() <= now.getTime()) {
+    target.setTime(now.getTime() + 5 * 60 * 1000);
+  }
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      identifier: MASTER_QUESTION_ID,
+      content: {
+        title: '🎯 분석가 트윈이의 오늘 밤 맞춤 질문',
+        body: question,
+        sound: true,
+        badge: 1,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: target,
       },
     });
   } catch {}

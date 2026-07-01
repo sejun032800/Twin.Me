@@ -46,17 +46,21 @@ interface ViralShareCardProps {
   partnerName: string;
   /** Forwarded ref — on web this resolves to the underlying DOM node for capture */
   cardRef?: React.RefObject<View | null>;
+  /** 'freeHighlight' (FUN-REP-002): 워터마크 포함 무료 미리보기 — matchStats/radar 절대 미노출 */
+  mode?: 'full' | 'freeHighlight';
 }
 
-export function ViralShareCard({ reportData, myName, cardRef }: ViralShareCardProps) {
+export function ViralShareCard({ reportData, myName, cardRef, mode = 'full' }: ViralShareCardProps) {
   const {
     overallScore, radarAxes, radarValues, topTopics,
-    matchStats, weekLabel, weatherLabel,
+    matchStats, weekLabel, weatherLabel, bestMomentText,
   } = reportData;
 
+  const isFreeHighlight = mode === 'freeHighlight';
   const mbti     = getRelationshipMbti(overallScore, topTopics);
   const fouls    = matchStats?.fouls.me ?? 0;
   const yellowCard = getYellowCardLine(fouls, myName);
+  const highlightQuote = bestMomentText || '이번 주에도 사랑스러운 순간들이 가득했어요 💕';
 
   const scoreColor =
     overallScore >= 80 ? '#4ADE80' :
@@ -107,31 +111,37 @@ export function ViralShareCard({ reportData, myName, cardRef }: ViralShareCardPr
           <Text style={cardStyles.copyPillValue}>{mbti}</Text>
         </View>
         <View style={cardStyles.copyPill}>
-          <Text style={cardStyles.copyPillLabel}>이번 주 판정</Text>
-          <Text style={cardStyles.copyPillValue}>{yellowCard}</Text>
+          <Text style={cardStyles.copyPillLabel}>{isFreeHighlight ? '이번 주 다정 발췌' : '이번 주 판정'}</Text>
+          <Text style={cardStyles.copyPillValue}>{isFreeHighlight ? `"${highlightQuote}"` : yellowCard}</Text>
         </View>
       </View>
 
-      {/* ── RADAR BARS ── */}
-      <View style={cardStyles.barsSection}>
-        {radarAxes.map((ax, i) => {
-          const pct = Math.round((radarValues[i] ?? 0) * 100);
-          const color = AXIS_COLORS[i % AXIS_COLORS.length];
-          return (
-            <View key={ax} style={cardStyles.barRow}>
-              <Text style={cardStyles.barLabel}>{ax}</Text>
-              <View style={cardStyles.barTrack}>
-                <LinearGradient
-                  colors={[color, color + '88']}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                  style={[cardStyles.barFill, { width: `${pct}%` as any }]}
-                />
+      {/* ── RADAR BARS (premium) / 워터마크 리본 (무료 하이라이트) ── */}
+      {isFreeHighlight ? (
+        <View style={cardStyles.watermarkRibbon}>
+          <Text style={cardStyles.watermarkRibbonText}>🔓 무료 미리보기 · 전체 리포트는 프리미엄에서</Text>
+        </View>
+      ) : (
+        <View style={cardStyles.barsSection}>
+          {radarAxes.map((ax, i) => {
+            const pct = Math.round((radarValues[i] ?? 0) * 100);
+            const color = AXIS_COLORS[i % AXIS_COLORS.length];
+            return (
+              <View key={ax} style={cardStyles.barRow}>
+                <Text style={cardStyles.barLabel}>{ax}</Text>
+                <View style={cardStyles.barTrack}>
+                  <LinearGradient
+                    colors={[color, color + '88']}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={[cardStyles.barFill, { width: `${pct}%` as any }]}
+                  />
+                </View>
+                <Text style={[cardStyles.barPct, { color }]}>{pct}%</Text>
               </View>
-              <Text style={[cardStyles.barPct, { color }]}>{pct}%</Text>
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
+      )}
 
       {/* ── FOOTER ── */}
       <View style={cardStyles.footer}>
@@ -154,11 +164,14 @@ interface ViralShareModalProps {
   reportData: WeeklyReportData | null;
   myName: string;
   partnerName: string;
+  /** 'freeHighlight' (FUN-REP-002): 워터마크 포함 무료 미리보기 카드 */
+  mode?: 'full' | 'freeHighlight';
 }
 
 export function ViralShareModal({
-  visible, onClose, reportData, myName, partnerName,
+  visible, onClose, reportData, myName, partnerName, mode = 'full',
 }: ViralShareModalProps) {
+  const isFreeHighlight = mode === 'freeHighlight';
   const [capturing, setCapturing] = useState(false);
 
   const overlayOpacity  = useSharedValue(0);
@@ -198,14 +211,14 @@ export function ViralShareModal({
         domRef = cardRef.current as unknown as Element;
       }
 
-      await captureAndShare({ domRef, reportData, myName, partnerName });
+      await captureAndShare({ domRef, reportData, myName, partnerName, mode });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       Alert.alert('오류', '이미지 생성에 실패했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setCapturing(false);
     }
-  }, [reportData, myName, partnerName]);
+  }, [reportData, myName, partnerName, mode]);
 
   if (!visible || !reportData) return null;
 
@@ -226,8 +239,10 @@ export function ViralShareModal({
             style={StyleSheet.absoluteFill}
           />
           <View style={shareModalStyles.headerLeft}>
-            <Text style={shareModalStyles.headerTitle}>✨ 이주의 연애 카드</Text>
-            <Text style={shareModalStyles.headerSub}>인스타 스토리에 자랑해 보세요!</Text>
+            <Text style={shareModalStyles.headerTitle}>{isFreeHighlight ? '💫 무료 하이라이트 카드' : '✨ 이주의 연애 카드'}</Text>
+            <Text style={shareModalStyles.headerSub}>
+              {isFreeHighlight ? '워터마크 포함 무료 미리보기예요!' : '인스타 스토리에 자랑해 보세요!'}
+            </Text>
           </View>
           <Pressable onPress={onClose} style={shareModalStyles.closeBtn}>
             <Text style={shareModalStyles.closeBtnText}>✕</Text>
@@ -240,6 +255,7 @@ export function ViralShareModal({
             cardRef={cardRef}
             reportData={reportData}
             myName={myName}
+            mode={mode}
             partnerName={partnerName}
           />
           {/* Neon frame border glow */}
@@ -340,6 +356,12 @@ const cardStyles = StyleSheet.create({
   },
   copyPillLabel: { color: '#64748B', fontSize: 8, fontWeight: FontWeight.semibold, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 2 },
   copyPillValue: { color: '#F1F5F9', fontSize: 12, fontWeight: FontWeight.bold, lineHeight: 17 },
+  watermarkRibbon: {
+    backgroundColor: 'rgba(217,70,239,0.14)',
+    borderRadius: Radius.md, borderWidth: 1, borderStyle: 'dashed',
+    borderColor: 'rgba(217,70,239,0.5)', padding: 10, alignItems: 'center',
+  },
+  watermarkRibbonText: { color: '#D946EF', fontSize: 10, fontWeight: FontWeight.bold, textAlign: 'center' },
   barsSection: { gap: 7 },
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   barLabel: { color: '#94A3B8', fontSize: 9, width: 34 },

@@ -25,6 +25,8 @@ if (Platform.OS !== 'web') {
   _Paths = fs.Paths;
 }
 import type { UserProfile, PartnerProfile } from '../context/AppContext';
+import { EVENT_REGISTRY, type EventCode } from '../engine/metrics';
+import { scheduleMasterQuestionPush } from './localNotificationService';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -74,10 +76,13 @@ export interface WeeklyReportData {
   topTopics: string[];      // TOP 3 keyword text list shown to free users
   bestMomentText: string;   // one-line highlight excerpt for free users
   // ── FUN-REP-001: Premium tier fields ─────────────────────────────────────
+  /** @deprecated FUN-REP-002: 리포트 UI에서 제거됨 — scheduleMasterQuestionPush()로 그날 밤 실시간 푸시 이관 */
   questQuestion?: string;
   bestMomentChatLogs?: BestMomentLog[];
   matchStats?: MatchStats;
   auditLogs?: AuditLogEntry[];
+  // ── FUN-REP-002: 첫 주 풀 언락 트라이얼 (손실 회피 기법) ───────────────────
+  isFirstReport?: boolean;
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -537,12 +542,42 @@ async function saveLastGeneratedTimestamp(ts: number): Promise<void> {
 // LAYER 6 — Full pipeline orchestrator
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ── FUN-REP-002 §2.4: DNA 감사 로그 — v2.2 100종 이벤트 딕셔너리 바인딩 ────────
+// 실제 대화 원문이 아닌, 온디바이스에서 집계된 코드/델타만 사용한다.
+
+function makeAuditEntry(
+  datetime: string,
+  sender: string,
+  code: EventCode,
+): AuditLogEntry {
+  const def = EVENT_REGISTRY[code];
+  const sign = def.delta >= 0 ? '+' : '';
+  return {
+    datetime,
+    sender,
+    code,
+    label: def.label,
+    delta: `${sign}${def.delta.toFixed(2)}%`,
+    isPositive: def.delta >= 0,
+  };
+}
+
+/** 감산 로그를 "비난"이 아닌 "이해와 성장" 프레임으로 재구성한 코멘트. */
+export function growthFrameCopy(entry: AuditLogEntry): string {
+  if (entry.isPositive) return entry.label;
+  return `성장 포인트 · ${entry.label}— 다음엔 이렇게 바꿔볼 기회예요`;
+}
+
+/** FUN-REP-002 §2.4 표기 규격: "날짜 시각 | 주체 | 코드 (한글 설명) | ±δ%" */
+export function formatAuditLine(entry: AuditLogEntry): string {
+  return `${entry.datetime} | ${entry.sender} | ${entry.code} (${entry.label}) | ${entry.delta}`;
+}
+
 function buildMockPremiumFields(
   myName: string,
   partnerName: string,
-): Pick<WeeklyReportData, 'questQuestion' | 'bestMomentChatLogs' | 'matchStats' | 'auditLogs'> {
+): Pick<WeeklyReportData, 'bestMomentChatLogs' | 'matchStats' | 'auditLogs'> {
   return {
-    questQuestion: `최근 두 분 사이에 '서운함' 토픽이 평소보다 22.4% 상승했어요. 오늘 밤엔 "${partnerName}아, 요즘 내가 무심코 던진 말 중에 마음에 걸렸던 게 있었어?"라고 먼저 따뜻하게 물어보는 건 어떨까요?`,
     bestMomentChatLogs: [
       { role: 'partner', text: '오늘도 진짜 힘들었는데 네가 있어서 버텼어', time: '오후 11:02' },
       { role: 'me', text: '나도 네가 있어서 얼마나 행복한지 몰라 💕', time: '오후 11:03' },
@@ -556,21 +591,21 @@ function buildMockPremiumFields(
       distanceCovered: { me: 4218, partner: 3891 },
     },
     auditLogs: [
-      { datetime: '6월 9일 09:14',  sender: myName,      code: 'G-REG-006', label: '선제적 일상 공유',        delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 9일 21:38',  sender: partnerName, code: 'G-REG-002', label: '칭찬 및 지지 피드백',     delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 10일 14:22', sender: myName,      code: 'L-MIC-002', label: '영혼 없는 단답 리액션',   delta: '-0.1%', isPositive: false },
-      { datetime: '6월 11일 10:55', sender: myName,      code: 'G-REG-005', label: '비대면 텍스트 밀도 케어', delta: '+0.2%', isPositive: true  },
-      { datetime: '6월 11일 22:03', sender: partnerName, code: 'G-REG-004', label: '미래/공동 서사 언급',     delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 12일 13:30', sender: myName,      code: 'L-MIC-004', label: '텍스트 대기 방치(읽씹)',  delta: '-0.1%', isPositive: false },
-      { datetime: '6월 12일 23:17', sender: myName,      code: 'G-CON-001', label: '성찰 후 I-Message 재개', delta: '+0.3%', isPositive: true  },
-      { datetime: '6월 13일 08:48', sender: partnerName, code: 'G-REG-001', label: 'T형 유저 감정 미러링',    delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 13일 20:12', sender: myName,      code: 'L-MIC-006', label: '업무형 텍스트 변환',     delta: '-0.1%', isPositive: false },
-      { datetime: '6월 14일 12:05', sender: myName,      code: 'G-REG-003', label: '이모티콘/문체 동기화',   delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 14일 17:44', sender: partnerName, code: 'L-MIC-001', label: 'F형 서운함 무시',        delta: '-0.2%', isPositive: false },
-      { datetime: '6월 14일 23:29', sender: myName,      code: 'G-CON-002', label: '명시적 사과 및 수용',     delta: '+0.3%', isPositive: true  },
-      { datetime: '6월 15일 09:20', sender: myName,      code: 'G-REG-002', label: '칭찬 및 지지 피드백',    delta: '+0.1%', isPositive: true  },
-      { datetime: '6월 15일 14:32', sender: myName,      code: 'G-CON-001', label: '성찰 후 I-Message 재개', delta: '+0.3%', isPositive: true  },
-      { datetime: '6월 15일 22:11', sender: partnerName, code: 'L-MIC-001', label: 'F형 서운함 공감 실패',    delta: '-0.2%', isPositive: false },
+      makeAuditEntry('6월 9일 09:14',  myName,      'G-REG-006'),
+      makeAuditEntry('6월 9일 21:38',  partnerName, 'G-REG-002'),
+      makeAuditEntry('6월 10일 14:22', myName,      'L-MIC-002'),
+      makeAuditEntry('6월 11일 10:55', myName,      'G-REG-005'),
+      makeAuditEntry('6월 11일 22:03', partnerName, 'G-FUT-003'),
+      makeAuditEntry('6월 12일 13:30', myName,      'L-MIC-004'),
+      makeAuditEntry('6월 12일 23:17', myName,      'G-CON-001'),
+      makeAuditEntry('6월 13일 08:48', partnerName, 'G-REG-001'),
+      makeAuditEntry('6월 13일 20:12', myName,      'L-MIC-006'),
+      makeAuditEntry('6월 14일 12:05', myName,      'G-REG-003'),
+      makeAuditEntry('6월 14일 17:44', partnerName, 'L-MIC-001'),
+      makeAuditEntry('6월 14일 23:29', myName,      'G-CON-002'),
+      makeAuditEntry('6월 15일 09:20', myName,      'G-REG-002'),
+      makeAuditEntry('6월 15일 14:32', myName,      'G-CON-001'),
+      makeAuditEntry('6월 15일 22:11', partnerName, 'L-MIC-001'),
     ],
   };
 }
@@ -580,6 +615,10 @@ export async function generateFullReport(
   myProfile: UserProfile,
   partnerProfile: PartnerProfile,
 ): Promise<WeeklyReportData> {
+  // FUN-REP-002 §5: 첫 주 풀 언락 트라이얼 — 이번이 최초 생성이면 손실 회피 기법으로 전면 공개
+  const priorGeneratedAt = await loadLastGeneratedTimestamp();
+  const isFirstReport = priorGeneratedAt === 0;
+
   const metrics = computeWeeklyMetrics(rawKakaoText, myProfile.name);
   const analystComment = await generateAnalystSummary(metrics, myProfile, partnerProfile);
   const premiumFields = buildMockPremiumFields(myProfile.name, partnerProfile.name);
@@ -590,6 +629,7 @@ export async function generateFullReport(
     generatedAt: Date.now(),
     analystComment,
     isLoading: false,
+    isFirstReport,
   };
 
   // Persist both the report and the generation timestamp
@@ -597,6 +637,12 @@ export async function generateFullReport(
     saveReportToCache(report),
     saveLastGeneratedTimestamp(Date.now()),
   ]);
+
+  // FUN-REP-002 §2.1: '마스터 커플 질문'은 리포트에서 제거되고, 그 감정이 살아있는
+  // 그날 밤 실시간 푸시로 이관된다 (B.5 연동).
+  const topTopic = metrics.topics[0]?.label ?? '요즘 대화';
+  const masterQuestion = `최근 두 분 사이에 '${topTopic}' 토픽 비중이 높았어요. 오늘 밤엔 "${partnerProfile.name}아, 요즘 내가 무심코 던진 말 중에 마음에 걸렸던 게 있었어?"라고 먼저 따뜻하게 물어보는 건 어떨까요?`;
+  scheduleMasterQuestionPush(masterQuestion).catch(() => {});
 
   return report;
 }

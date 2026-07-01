@@ -30,12 +30,14 @@ import { useCustomTheme } from '../../context/CustomThemeContext';
 import { OCEAN_THEME_ID } from '../../styles/ocean';
 import { SAVANNAH_THEME_ID } from '../../styles/savannah';
 import { PASTEL_PINK_THEME_ID } from '../../styles/pastelPink';
-import type {
-  AuditLogEntry,
-  BestMomentLog,
-  MatchStats,
-  TopicItem,
-  WeeklyReportData,
+import {
+  formatAuditLine,
+  growthFrameCopy,
+  type AuditLogEntry,
+  type BestMomentLog,
+  type MatchStats,
+  type TopicItem,
+  type WeeklyReportData,
 } from '../../services/weeklyReportService';
 import { ViralShareModal } from '../share/ViralShareCard';
 
@@ -183,19 +185,17 @@ function HardLockSection({
 
 // ── Section 1: Topics ─────────────────────────────────────────────────────────
 
+// FUN-REP-002 §2.1: '마스터 커플 질문'은 리포트에서 완전히 제거되고, 그 감정이
+// 살아있는 그날 밤 실시간 푸시(scheduleMasterQuestionPush)로 이관되었다.
 function TopicsSection({
   r,
   isPremium,
-  unlockAnim,
-  onPressLocked,
 }: {
   r: WeeklyReportData;
   isPremium: boolean;
-  unlockAnim: ReturnType<typeof useSharedValue<number>>;
-  onPressLocked: (domain: LockDomain) => void;
 }) {
   if (!isPremium) {
-    // Free tier: TOP 3 text list + blinded quest question
+    // Free tier: TOP 3 text list (바이럴 자산 개방 — 하드락 없음)
     return (
       <View style={rStyles.sectionCard}>
         <Text style={rStyles.sectionTitle}>💬 최근 대화 주제 분석</Text>
@@ -212,25 +212,14 @@ function TopicsSection({
         ) : (
           <Text style={rStyles.emptyCardText}>대화 데이터 분석 중이에요</Text>
         )}
-        {/* Quest question — blurred */}
-        <Pressable onPress={() => onPressLocked('audit_log')} style={rStyles.questBlurWrap}>
-          <View style={Platform.OS === 'web' ? { filter: 'blur(6px)' } as object : { opacity: 0.1 }}>
-            <Text style={rStyles.questBlurText}>
-              최근 두 분 사이에 서운함 토픽이 평소보다 22.4% 상승했어요.
-              오늘 밤엔 "자기야, 요즘 내가 무심코 던진 말 중에 마음에 걸렸던 게 있었어?"
-              라고 먼저 따뜻하게 물어보는 건 어떨까요?
-            </Text>
-          </View>
-          <View style={rStyles.questBlurOverlay}>
-            <Text style={rStyles.questBlurIcon}>🔒</Text>
-            <Text style={rStyles.questBlurLabel}>트윈이 맞춤 퀘스트 질문 잠금 해제</Text>
-          </View>
-        </Pressable>
+        <View style={rStyles.pushNoticeRow}>
+          <Text style={rStyles.pushNoticeText}>🔔 오늘 밤엔 트윈이가 맞춤 질문 1가지를 폰으로 살짝 보내드릴게요</Text>
+        </View>
       </View>
     );
   }
 
-  // Premium tier: full pie chart + legend + quest question
+  // Premium tier: full pie chart + legend
   return (
     <View style={rStyles.sectionCard}>
       <Text style={rStyles.sectionTitle}>💬 최근 대화 주제 분석</Text>
@@ -242,18 +231,9 @@ function TopicsSection({
       ) : (
         <Text style={rStyles.emptyCardText}>대화 데이터 분석 중이에요</Text>
       )}
-      {r.questQuestion && (
-        <View style={rStyles.questCard}>
-          <LinearGradient
-            colors={['rgba(124,58,237,0.18)', 'rgba(217,70,239,0.10)']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <Text style={rStyles.questIcon}>🎯</Text>
-          <Text style={rStyles.questTitle}>분석가 트윈이의 이번 주 맞춤 퀘스트</Text>
-          <Text style={rStyles.questText}>{r.questQuestion}</Text>
-        </View>
-      )}
+      <View style={rStyles.pushNoticeRow}>
+        <Text style={rStyles.pushNoticeText}>🔔 오늘 밤엔 트윈이가 맞춤 질문 1가지를 폰으로 살짝 보내드릴게요</Text>
+      </View>
     </View>
   );
 }
@@ -264,10 +244,12 @@ function BestMomentSection({
   r,
   isPremium,
   partnerName,
+  onOpenFreeShare,
 }: {
   r: WeeklyReportData;
   isPremium: boolean;
   partnerName: string;
+  onOpenFreeShare: () => void;
 }) {
   const { activeTheme } = useCustomTheme();
   const isOcean = activeTheme?.id === OCEAN_THEME_ID;
@@ -287,6 +269,10 @@ function BestMomentSection({
           트윈이가 이 순간을 기억해 뒀어요 🤍{'\n'}
           프리미엄으로 업그레이드하면 대화방 그대로 재현한 그래픽 모먼트를 볼 수 있어요!
         </Text>
+        {/* FUN-REP-002 §2.2: 무료 바이럴 루프 — 워터마크 포함 9:16 공유 카드 1장 */}
+        <TouchableOpacity style={rStyles.freeShareBtn} onPress={onOpenFreeShare} activeOpacity={0.85}>
+          <Text style={rStyles.freeShareBtnText}>💫 무료 하이라이트 카드 만들기 (워터마크 포함)</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -428,9 +414,12 @@ function MatchStatsBar({
 }
 
 function MatchStatsContent({
-  stats, myName, partnerName,
+  stats, myName, partnerName, isPremium, blur, unlockAnim, onPressLocked,
 }: {
   stats: MatchStats; myName: string; partnerName: string;
+  isPremium: boolean; blur: number;
+  unlockAnim: ReturnType<typeof useSharedValue<number>>;
+  onPressLocked: (domain: LockDomain) => void;
 }) {
   const handleShare = () => {
     const text = [
@@ -472,6 +461,7 @@ function MatchStatsContent({
         </View>
       </View>
 
+      {/* FUN-REP-002 §2.4: 유저 락인 + 공유 유도를 위해 2개 스탯은 무료 상시 공개 */}
       <MatchStatsBar
         label="애정표현 점유율"
         meVal={stats.possession.me} partnerVal={stats.possession.partner}
@@ -484,28 +474,47 @@ function MatchStatsContent({
         unit="회" myName={myName} partnerName={partnerName}
         meColor="#FF6B8B" partnerColor="#A78BFA"
       />
-      <MatchStatsBar
-        label="공감 차단 반칙"
-        meVal={stats.fouls.me} partnerVal={stats.fouls.partner}
-        unit="회" myName={myName} partnerName={partnerName}
-        meColor="#EF4444" partnerColor="#F97316"
-      />
-      <MatchStatsBar
-        label="총 활동량"
-        meVal={stats.distanceCovered.me} partnerVal={stats.distanceCovered.partner}
-        unit="자" myName={myName} partnerName={partnerName}
-        meColor="#7C3AED" partnerColor="#06B6D4"
-      />
 
-      <TouchableOpacity style={msStyles.shareBtn} onPress={handleShare} activeOpacity={0.82}>
-        <LinearGradient
-          colors={['#FF6B8B', '#D946EF', '#7C3AED']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-          style={msStyles.shareBtnGrad}
-        >
-          <Text style={msStyles.shareBtnText}>📸 인스타 스토리로 공유하기</Text>
-        </LinearGradient>
-      </TouchableOpacity>
+      {/* 나머지 2개 스탯(공감 차단 반칙/총 활동량)은 프리미엄 전용 하드락 유지 */}
+      <HardLockSection
+        isPremium={isPremium}
+        blur={blur}
+        domain="match_stats"
+        onPressLocked={onPressLocked}
+        title="🔒 나머지 2개 핵심 스탯"
+        unlockAnim={unlockAnim}
+      >
+        <MatchStatsBar
+          label="공감 차단 반칙"
+          meVal={stats.fouls.me} partnerVal={stats.fouls.partner}
+          unit="회" myName={myName} partnerName={partnerName}
+          meColor="#EF4444" partnerColor="#F97316"
+        />
+        <MatchStatsBar
+          label="총 활동량"
+          meVal={stats.distanceCovered.me} partnerVal={stats.distanceCovered.partner}
+          unit="자" myName={myName} partnerName={partnerName}
+          meColor="#7C3AED" partnerColor="#06B6D4"
+        />
+      </HardLockSection>
+
+      {!isPremium && (
+        <Text style={msStyles.lockedHint}>
+          축구 경기 스탯으로 두 분의 연애 전선을 낱낱이 확인하고 인스타에 자랑해 보세요!
+        </Text>
+      )}
+
+      {isPremium && (
+        <TouchableOpacity style={msStyles.shareBtn} onPress={handleShare} activeOpacity={0.82}>
+          <LinearGradient
+            colors={['#FF6B8B', '#D946EF', '#7C3AED']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={msStyles.shareBtnGrad}
+          >
+            <Text style={msStyles.shareBtnText}>📸 인스타 스토리로 공유하기</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -531,6 +540,7 @@ const msStyles = StyleSheet.create({
   shareBtn: { borderRadius: Radius.pill, overflow: 'hidden', marginTop: Spacing.md },
   shareBtnGrad: { paddingVertical: 13, alignItems: 'center' },
   shareBtnText: { color: '#fff', fontSize: FontSize.base, fontWeight: FontWeight.bold, letterSpacing: 0.2 },
+  lockedHint: { color: '#64748B', fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18, marginTop: Spacing.sm },
 });
 
 // ── Section 5: DNA Audit Log ──────────────────────────────────────────────────
@@ -550,19 +560,18 @@ function AuditLogContent({ logs }: { logs: AuditLogEntry[] }) {
       </View>
       {logs.map((log, i) => (
         <View key={i} style={[auditStyles.logCard, { borderLeftColor: log.isPositive ? '#4ADE80' : '#EF4444' }]}>
+          {/* FUN-REP-002 §2.4 표기 규격: "날짜 시각 | 주체 | 코드 (한글 설명) | ±δ%" */}
+          <Text style={auditStyles.logLine} numberOfLines={1}>{formatAuditLine(log)}</Text>
           <View style={auditStyles.logHeader}>
-            <Text style={auditStyles.logDatetime}>{log.datetime}</Text>
+            <View style={[auditStyles.codePill, { backgroundColor: log.isPositive ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)' }]}>
+              <Text style={[auditStyles.codeText, { color: log.isPositive ? '#4ADE80' : '#EF4444' }]}>{log.code}</Text>
+            </View>
             <Text style={[auditStyles.logDelta, { color: log.isPositive ? '#4ADE80' : '#EF4444' }]}>
               {log.delta}
             </Text>
           </View>
-          <View style={auditStyles.logBody}>
-            <View style={[auditStyles.codePill, { backgroundColor: log.isPositive ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)' }]}>
-              <Text style={[auditStyles.codeText, { color: log.isPositive ? '#4ADE80' : '#EF4444' }]}>{log.code}</Text>
-            </View>
-            <Text style={auditStyles.logLabel}>{log.label}</Text>
-            <Text style={auditStyles.logSender}>{log.sender}</Text>
-          </View>
+          {/* 감산 로그는 비난이 아닌 '이해와 성장' 프레임으로 재구성 */}
+          <Text style={auditStyles.logGrowth}>{growthFrameCopy(log)}</Text>
         </View>
       ))}
     </View>
@@ -574,14 +583,12 @@ const auditStyles = StyleSheet.create({
   summaryLabel: { color: '#94A3B8', fontSize: FontSize.sm, fontWeight: FontWeight.medium },
   summaryDelta: { fontSize: FontSize.lg, fontWeight: FontWeight.extrabold },
   logCard: { borderLeftWidth: 3, paddingLeft: Spacing.md, paddingVertical: 8, marginBottom: Spacing.sm, borderRadius: 3 },
+  logLine: { color: '#64748B', fontSize: 10, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), marginBottom: 4 },
   logHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  logDatetime: { color: '#64748B', fontSize: 10 },
   logDelta: { fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  logBody: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   codePill: { borderRadius: Radius.pill, paddingHorizontal: 6, paddingVertical: 2 },
   codeText: { fontSize: 9, fontWeight: FontWeight.bold },
-  logLabel: { flex: 1, color: '#CBD5E1', fontSize: FontSize.xs },
-  logSender: { color: '#64748B', fontSize: 9 },
+  logGrowth: { color: '#CBD5E1', fontSize: FontSize.xs, lineHeight: 18 },
 });
 
 // ── Paywall Nudge Modal ───────────────────────────────────────────────────────
@@ -774,9 +781,12 @@ interface WeeklyReportModalProps {
 }
 
 export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) {
-  const { weeklyReportData, myProfile, partnerProfile, subscriptionStatus, setSubscriptionStatus } = useAppContext();
+  const { weeklyReportData, myProfile, partnerProfile, subscriptionStatus, setSubscriptionStatus, oneTimeHighlightUnlocked } = useAppContext();
   const isPremium = subscriptionStatus.isPremium;
   const r: WeeklyReportData | null = weeklyReportData;
+  // FUN-REP-002 §5: 첫 주 풀 언락 트라이얼 — 최초 리포트는 손실 회피 기법으로 전면 공개
+  const isFirstReportTrial = !isPremium && (r?.isFirstReport ?? false);
+  const effectivePremium = isPremium || isFirstReportTrial;
 
   // Snap paging
   const { height: winH } = useWindowDimensions();
@@ -805,12 +815,14 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
 
   // Viral share card state
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  // FUN-REP-002 §2.2: 무료 워터마크 하이라이트 공유 카드 (별도 모달)
+  const [freeShareModalVisible, setFreeShareModalVisible] = useState(false);
 
   // Animated premium unlock progress (0 = locked, 1 = unlocked)
-  const unlockAnim = useSharedValue(isPremium ? 1 : 0);
+  const unlockAnim = useSharedValue(effectivePremium ? 1 : 0);
   useEffect(() => {
-    unlockAnim.value = withSpring(isPremium ? 1 : 0, { damping: 20, stiffness: 200, mass: 0.8 });
-  }, [isPremium, unlockAnim]);
+    unlockAnim.value = withSpring(effectivePremium ? 1 : 0, { damping: 20, stiffness: 200, mass: 0.8 });
+  }, [effectivePremium, unlockAnim]);
 
   // Modal slide-up animation
   const overlayOpacity = useSharedValue(0);
@@ -839,7 +851,7 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
   }));
 
   const openPaywall = (domain: LockDomain) => {
-    if (isPremium) return;
+    if (effectivePremium) return;
     setPaywallDomain(domain);
     setPaywallVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -873,6 +885,11 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
           {isPremium && (
             <View style={mStyles.premiumBadge}>
               <Text style={mStyles.premiumBadgeText}>✦ PREMIUM</Text>
+            </View>
+          )}
+          {isFirstReportTrial && (
+            <View style={[mStyles.premiumBadge, mStyles.trialBadge]}>
+              <Text style={mStyles.premiumBadgeText}>✨ 첫 주 무료 체험</Text>
             </View>
           )}
           <Pressable onPress={onClose} style={mStyles.closeBtn}>
@@ -927,9 +944,7 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
                 <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
                   <TopicsSection
                     r={r}
-                    isPremium={isPremium}
-                    unlockAnim={unlockAnim}
-                    onPressLocked={openPaywall}
+                    isPremium={effectivePremium}
                   />
                   <View style={mStyles.snapNextHint}>
                     <Text style={mStyles.snapNextText}>아래로 스와이프 → 다음 섹션</Text>
@@ -942,8 +957,12 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
                 <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
                   <BestMomentSection
                     r={r}
-                    isPremium={isPremium}
+                    isPremium={effectivePremium || oneTimeHighlightUnlocked}
                     partnerName={partnerProfile.name}
+                    onOpenFreeShare={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setFreeShareModalVisible(true);
+                    }}
                   />
                 </ScrollView>
               </View>
@@ -952,7 +971,7 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
               <View style={[mStyles.snapPage, { height: svH }]}>
                 <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
                   <HardLockSection
-                    isPremium={isPremium}
+                    isPremium={effectivePremium}
                     blur={8}
                     domain="date_satisfaction"
                     onPressLocked={openPaywall}
@@ -964,27 +983,25 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
                 </ScrollView>
               </View>
 
-              {/* ── Page 3: 연애 전선 ──────────────────────────────────── */}
+              {/* ── Page 3: 연애 전선 (2스탯 무료 공개 + 2스탯 프리미엄 락) ── */}
               <View style={[mStyles.snapPage, { height: svH }]}>
                 <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
-                  <HardLockSection
-                    isPremium={isPremium}
-                    blur={8}
-                    domain="match_stats"
-                    onPressLocked={openPaywall}
-                    title="⚽ 연애 전선 리포트"
-                    unlockAnim={unlockAnim}
-                  >
+                  <View style={rStyles.sectionCard}>
+                    <Text style={rStyles.sectionTitle}>⚽ 연애 전선 리포트</Text>
                     {r.matchStats ? (
                       <MatchStatsContent
                         stats={r.matchStats}
                         myName={myProfile.name}
                         partnerName={partnerProfile.name}
+                        isPremium={effectivePremium}
+                        blur={8}
+                        unlockAnim={unlockAnim}
+                        onPressLocked={openPaywall}
                       />
                     ) : (
                       <Text style={rStyles.emptyCardText}>데이터 집계 중이에요</Text>
                     )}
-                  </HardLockSection>
+                  </View>
                 </ScrollView>
               </View>
 
@@ -993,7 +1010,7 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
                 <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
                   <View style={rStyles.sectionCard}>
                     <Text style={rStyles.sectionTitle}>🧬 연애 DNA 매칭률 로그</Text>
-                    {!isPremium ? (
+                    {!effectivePremium ? (
                       <View>
                         <View
                           style={Platform.OS === 'web'
@@ -1045,7 +1062,7 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
                     </View>
                   </View>
 
-                  {isPremium && (
+                  {effectivePremium && (
                     <TouchableOpacity
                       style={[rStyles.shareStoryCta, { marginTop: Spacing.md }]}
                       onPress={() => {
@@ -1086,13 +1103,24 @@ export function WeeklyReportModal({ visible, onClose }: WeeklyReportModalProps) 
         />
       )}
 
-      {/* Viral Share Card Modal */}
+      {/* Viral Share Card Modal (프리미엄 전체 카드) */}
       <ViralShareModal
         visible={shareModalVisible}
         onClose={() => setShareModalVisible(false)}
         reportData={r}
         myName={myProfile.name}
         partnerName={partnerProfile.name}
+        mode="full"
+      />
+
+      {/* Free Highlight Share Modal (FUN-REP-002 §2.2 — 워터마크 포함 무료 바이럴 루프) */}
+      <ViralShareModal
+        visible={freeShareModalVisible}
+        onClose={() => setFreeShareModalVisible(false)}
+        reportData={r}
+        myName={myProfile.name}
+        partnerName={partnerProfile.name}
+        mode="freeHighlight"
       />
     </View>
   );
@@ -1204,6 +1232,7 @@ const mStyles = StyleSheet.create({
     borderColor: 'rgba(255,107,139,0.35)',
   },
   premiumBadgeText: { color: '#FF6B8B', fontSize: 9, fontWeight: FontWeight.extrabold, letterSpacing: 1 },
+  trialBadge: { backgroundColor: 'rgba(217,70,239,0.15)', borderColor: 'rgba(217,70,239,0.35)' },
   closeBtn: {
     width: 30, height: 30, borderRadius: 15,
     backgroundColor: 'rgba(255,255,255,0.07)',
@@ -1321,22 +1350,22 @@ const rStyles = StyleSheet.create({
   topicRankText: { fontSize: 10, fontWeight: FontWeight.bold },
   topicTextLabel: { color: '#E2D9FF', fontSize: FontSize.sm, fontWeight: FontWeight.medium },
 
-  // Quest blur (free)
-  questBlurWrap: { position: 'relative', borderRadius: Radius.lg, overflow: 'hidden', marginTop: 4 },
-  questBlurText: { color: '#C084FC', fontSize: FontSize.xs, lineHeight: 20, padding: 12, backgroundColor: 'rgba(124,58,237,0.12)', borderRadius: Radius.lg },
-  questBlurOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(10,13,26,0.72)', borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', gap: 4, flexDirection: 'row' },
-  questBlurIcon: { fontSize: 14 },
-  questBlurLabel: { color: '#7C3AED', fontSize: 11, fontWeight: FontWeight.semibold },
-
-  // Quest card (premium)
-  questCard: {
-    borderRadius: Radius.lg, padding: Spacing.base,
-    overflow: 'hidden', gap: 6,
-    borderWidth: 1, borderColor: 'rgba(124,58,237,0.28)',
+  // FUN-REP-002 §2.1: 마스터 질문 실시간 푸시 이관 안내 (리포트 내부엔 더 이상 노출 안 함)
+  pushNoticeRow: {
+    borderRadius: Radius.lg, padding: Spacing.md, marginTop: 4,
+    backgroundColor: 'rgba(124,58,237,0.10)',
+    borderWidth: 1, borderColor: 'rgba(124,58,237,0.22)',
   },
-  questIcon: { fontSize: 20 },
-  questTitle: { color: '#A78BFA', fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
-  questText: { color: '#CBD5E1', fontSize: FontSize.sm, lineHeight: 22 },
+  pushNoticeText: { color: '#A78BFA', fontSize: FontSize.xs, lineHeight: 18 },
+
+  // FUN-REP-002 §2.2: 무료 워터마크 하이라이트 공유 버튼
+  freeShareBtn: {
+    borderRadius: Radius.pill, paddingVertical: 12, alignItems: 'center',
+    backgroundColor: 'rgba(217,70,239,0.14)',
+    borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(217,70,239,0.5)',
+    marginTop: 4,
+  },
+  freeShareBtnText: { color: '#D946EF', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
 
   // Donut + legend
   donutRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.base },

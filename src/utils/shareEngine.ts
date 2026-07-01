@@ -27,34 +27,68 @@ export function getYellowCardLine(fouls: number, name: string): string {
 }
 
 // ── HTML share card generator (native fallback) ───────────────────────────────
+//
+// mode 'full' (프리미엄 전체 카드): 레이더 차트 + 매치 스탯 파생 카피 포함.
+// mode 'freeHighlight' (FUN-REP-002 무료 바이럴 루프): 프리미엄 전용 데이터
+// (matchStats/radar)는 절대 노출하지 않고, 하이라이트 발췌문 + 워터마크만 렌더링.
 
 function buildShareCardHTML(
   reportData: WeeklyReportData,
   myName: string,
   partnerName: string,
+  mode: 'full' | 'freeHighlight' = 'full',
 ): string {
-  const { overallScore, radarAxes, radarValues, topTopics, matchStats, weekLabel } = reportData;
+  const { overallScore, radarAxes, radarValues, topTopics, matchStats, weekLabel, bestMomentText } = reportData;
   const mbti = getRelationshipMbti(overallScore, topTopics);
-  const fouls = matchStats?.fouls.me ?? 0;
-  const yellowCard = getYellowCardLine(fouls, myName);
-  const bars = radarAxes
-    .map((ax, i) => {
-      const pct = Math.round(radarValues[i] * 100);
-      const color = ['#FF6B8B', '#D946EF', '#7C3AED', '#38BDF8', '#4ADE80'][i % 5];
-      return `
-      <div style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span style="color:#94A3B8;font-size:11px">${ax}</span>
-          <span style="color:${color};font-size:11px;font-weight:700">${pct}%</span>
-        </div>
-        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:7px;overflow:hidden">
-          <div style="width:${pct}%;height:100%;border-radius:4px;background:linear-gradient(90deg,${color},${color}88)"></div>
-        </div>
-      </div>`;
-    })
-    .join('');
-
   const scoreColor = overallScore >= 80 ? '#4ADE80' : overallScore >= 60 ? '#FF6B8B' : '#F97316';
+
+  let middleSectionHTML: string;
+  if (mode === 'freeHighlight') {
+    const quote = bestMomentText || '이번 주에도 사랑스러운 순간들이 가득했어요 💕';
+    middleSectionHTML = `
+      <div class="copy-block">
+        <div class="copy-pill">
+          <div class="copy-label">우리의 연애 MBTI</div>
+          <div class="copy-value">${mbti}</div>
+        </div>
+        <div class="copy-pill">
+          <div class="copy-label">이번 주 다정 발췌</div>
+          <div class="copy-value">"${quote}"</div>
+        </div>
+      </div>
+      <div class="watermark-ribbon">🔓 무료 미리보기 · 전체 리포트는 프리미엄에서</div>`;
+  } else {
+    const fouls = matchStats?.fouls.me ?? 0;
+    const yellowCard = getYellowCardLine(fouls, myName);
+    const bars = radarAxes
+      .map((ax, i) => {
+        const pct = Math.round(radarValues[i] * 100);
+        const color = ['#FF6B8B', '#D946EF', '#7C3AED', '#38BDF8', '#4ADE80'][i % 5];
+        return `
+        <div style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="color:#94A3B8;font-size:11px">${ax}</span>
+            <span style="color:${color};font-size:11px;font-weight:700">${pct}%</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:7px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;border-radius:4px;background:linear-gradient(90deg,${color},${color}88)"></div>
+          </div>
+        </div>`;
+      })
+      .join('');
+    middleSectionHTML = `
+      <div class="copy-block">
+        <div class="copy-pill">
+          <div class="copy-label">우리의 연애 MBTI</div>
+          <div class="copy-value">${mbti}</div>
+        </div>
+        <div class="copy-pill">
+          <div class="copy-label">이번 주 판정</div>
+          <div class="copy-value">${yellowCard}</div>
+        </div>
+      </div>
+      <div class="bars">${bars}</div>`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -95,6 +129,8 @@ function buildShareCardHTML(
   .cta-arrow{color:#D946EF;font-size:11px}
   .brand{color:#64748B;font-size:9px;letter-spacing:0.5px}
   .divider{height:1px;background:rgba(255,255,255,0.08);width:100%}
+  .watermark-ribbon{background:rgba(217,70,239,0.14);border:1px dashed rgba(217,70,239,0.5);
+    border-radius:10px;padding:8px 10px;color:#D946EF;font-size:10px;font-weight:700;text-align:center}
 </style>
 </head>
 <body>
@@ -117,18 +153,7 @@ function buildShareCardHTML(
     <div class="score-label">애정 지수</div>
   </div>
 
-  <div class="copy-block">
-    <div class="copy-pill">
-      <div class="copy-label">우리의 연애 MBTI</div>
-      <div class="copy-value">${mbti}</div>
-    </div>
-    <div class="copy-pill">
-      <div class="copy-label">이번 주 판정</div>
-      <div class="copy-value">${yellowCard}</div>
-    </div>
-  </div>
-
-  <div class="bars">${bars}</div>
+  ${middleSectionHTML}
 
   <div class="divider"></div>
   <div class="footer">
@@ -169,12 +194,13 @@ async function captureNative(
   reportData: WeeklyReportData,
   myName: string,
   partnerName: string,
+  mode: 'full' | 'freeHighlight',
 ): Promise<void> {
   // SDK 56 new File/Paths API (native-only)
   const { File, Paths } = require('expo-file-system') as typeof import('expo-file-system');
   const Sharing = await import('expo-sharing');
 
-  const html = buildShareCardHTML(reportData, myName, partnerName);
+  const html = buildShareCardHTML(reportData, myName, partnerName, mode);
   const filename = `twinme_card_${Date.now()}.html`;
   const file = new File(Paths.cache, filename);
   file.write(html);
@@ -183,7 +209,7 @@ async function captureNative(
   if (isAvailable) {
     await Sharing.shareAsync(file.uri, {
       mimeType: 'text/html',
-      dialogTitle: '📊 Twin.me 주간 연애 리포트 공유',
+      dialogTitle: mode === 'freeHighlight' ? '💫 Twin.me 무료 하이라이트 공유' : '📊 Twin.me 주간 연애 리포트 공유',
       UTI: 'public.html',
     });
   }
@@ -197,13 +223,16 @@ export interface ShareCardOptions {
   reportData: WeeklyReportData;
   myName: string;
   partnerName: string;
+  /** 'freeHighlight' (FUN-REP-002): 워터마크 포함 무료 미리보기 — matchStats/radar 미노출 */
+  mode?: 'full' | 'freeHighlight';
 }
 
 export async function captureAndShare(opts: ShareCardOptions): Promise<void> {
+  const mode = opts.mode ?? 'full';
   if (Platform.OS === 'web') {
     if (!opts.domRef) throw new Error('domRef required on web');
     await captureWeb(opts.domRef);
   } else {
-    await captureNative(opts.reportData, opts.myName, opts.partnerName);
+    await captureNative(opts.reportData, opts.myName, opts.partnerName, mode);
   }
 }

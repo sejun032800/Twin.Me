@@ -1296,7 +1296,10 @@ const PLANS = [
     period: '/월',
     emoji: '🌙',
     desc: '무제한 딥챗, 크라이시스 중재안, 3D 헬릭스 타워 백업 무제한',
-    perks: ['무제한 딥챗 세션', '크라이시스 중재안 도출', '3D 헬릭스 타워 백업 무제한', '속마음 브리핑 리포트', '고음질 보이스 클로닝'],
+    // ⚠️ HOLD (SRS 보강판 #1 §3.4): '속마음 브리핑 리포트'는 거울 철학(연인의
+    // 심리를 대신 재단하지 않는다)과 충돌 개연성이 있어 창업가 의사결정 전까지
+    // 격리(perks에서 제외). 코드/카피 어디에도 재노출하지 말 것.
+    perks: ['무제한 딥챗 세션', '크라이시스 중재안 도출', '3D 헬릭스 타워 백업 무제한', '고음질 보이스 클로닝'],
     colors: ['#2D1B69', '#0A0D1A'] as const,
     accentColor: '#D946EF',
     featured: true,
@@ -1408,11 +1411,13 @@ const skeletonS = StyleSheet.create({
 interface PlanCardProps {
   plan: typeof PLANS[number];
   purchasingPlanId: PlanId | null;
-  onPurchase: (planId: PlanId) => void;
+  onPurchase: (planId: PlanId, mode?: 'buy' | 'gift') => void;
 }
 
 function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
-  const { subscriptionStatus, themeTokens } = useAppContext();
+  const { subscriptionStatus, themeTokens, partnerProfile, applyCoupleSubscription } = useAppContext();
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const { activeTheme } = useCustomTheme();
   const isOcean = activeTheme?.id === OCEAN_THEME_ID;
   const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
@@ -1624,7 +1629,68 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
             </LinearGradient>
           )}
         </Pressable>
+
+        {/* FUN-PAY-001 §2: 상대에게 프리미엄 선물하기 — 구독은 커플 단위 귀속이므로
+            선물해도 내 기기도 함께 프리미엄이 되지만, 파트너 채팅방에 선물 카드가 발송됨 */}
+        {!isSubscribedToThis && (
+          <Pressable
+            style={styles.giftPlanBtn}
+            onPress={() => {
+              if (isAnyPurchasing) return;
+              triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+              onPurchase(plan.id, 'gift');
+            }}
+            disabled={isAnyPurchasing}
+          >
+            <Text style={styles.giftPlanBtnText}>💝 {partnerProfile.name}에게 선물하기</Text>
+          </Pressable>
+        )}
+
+        {/* FUN-PAY-001 §5: 우아한 해지 — 즉시 삭제 대신 유예 기간·데이터 주권 안내 */}
+        {isSubscribedToThis && (
+          <Pressable
+            style={styles.cancelPlanLink}
+            onPress={() => {
+              triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+              setShowCancelModal(true);
+            }}
+          >
+            <Text style={styles.cancelPlanLinkText}>구독 해지하기</Text>
+          </Pressable>
+        )}
       </LinearGradient>
+
+      <Modal visible={showCancelModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: themeTokens.card, borderColor: 'rgba(124,58,237,0.22)' }]}>
+            <Text style={styles.modalEmoji}>🕊️</Text>
+            <Text style={[styles.modalTitle, { color: themeTokens.text }]}>우아하게 헤어질 시간이에요</Text>
+            <Text style={[styles.modalDesc, { color: themeTokens.textSecondary }]}>
+              지금 해지해도 이번 결제 주기가 끝날 때까지는 프리미엄 기능을 계속 이용하실 수 있어요.{'\n\n'}
+              두 분이 쌓아온 대화 기록·DNA 히스토리·추억은 즉시 삭제되지 않고 데이터 주권 정책에 따라
+              안전하게 보존돼요. 언제든 다시 구독하면 그대로 이어갈 수 있어요.
+            </Text>
+            <Pressable
+              style={ftS.logoutConfirmBtn}
+              disabled={isCancelling}
+              onPress={async () => {
+                setIsCancelling(true);
+                await applyCoupleSubscription({ isPremium: false, planId: null, expiresAt: null });
+                setIsCancelling(false);
+                setShowCancelModal(false);
+                triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+              }}
+            >
+              {isCancelling
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={ftS.logoutConfirmText}>네, 해지할게요</Text>}
+            </Pressable>
+            <Pressable style={styles.modalCancelBtn} onPress={() => setShowCancelModal(false)}>
+              <Text style={[styles.modalCancelText, { color: themeTokens.textMuted }]}>계속 함께할게요</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </Animated.View>
   );
 }
@@ -1632,7 +1698,7 @@ function PlanCard({ plan, purchasingPlanId, onPurchase }: PlanCardProps) {
 // ─── Subscription Store container ─────────────────────────────────────────────
 
 function SubscriptionStore() {
-  const { setSubscriptionStatus } = useAppContext();
+  const { applyCoupleSubscription, giftPremiumToPartner, partnerProfile } = useAppContext();
 
   const [purchasingPlanId, setPurchasingPlanId] = useState<PlanId | null>(null);
   const [snackbarMsg, setSnackbarMsg]           = useState('');
@@ -1671,11 +1737,17 @@ function SubscriptionStore() {
     setTimeout(() => setSnackbarVisible(false), 3200);
   }
 
-  const handlePurchase = async (planId: PlanId) => {
+  // FUN-PAY-001 §1: 구독 성공 시 개인이 아닌 Couple_ID 단위로 엔타이틀먼트를 귀속
+  const handlePurchase = async (planId: PlanId, mode: 'buy' | 'gift' = 'buy') => {
     setPurchasingPlanId(planId);
     try {
       const status = await purchaseSubscription(planId);
-      setSubscriptionStatus(status);
+      if (mode === 'gift') {
+        await giftPremiumToPartner(status);
+        showSnackbar(`${partnerProfile.name}님에게 프리미엄을 선물했어요! 🎁 채팅방에서 확인해 보세요`);
+      } else {
+        await applyCoupleSubscription(status);
+      }
       triggerHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
     } catch (err) {
       const isCancelled = (err as { userCancelled?: boolean }).userCancelled === true;
@@ -3515,5 +3587,30 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.3,
+  },
+  giftPlanBtn: {
+    marginTop: 10,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(217,70,239,0.45)',
+    backgroundColor: 'rgba(217,70,239,0.08)',
+  },
+  giftPlanBtnText: {
+    color: '#D946EF',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  cancelPlanLink: {
+    marginTop: 10,
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  cancelPlanLinkText: {
+    color: 'rgba(226,217,255,0.55)',
+    fontSize: FontSize.xs,
+    textDecorationLine: 'underline',
   },
 });

@@ -21,6 +21,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { purchaseOneTimeProduct } from '../../src/services/iapService';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -54,31 +56,43 @@ import { SAVANNAH_THEME_ID, SavannahTokens } from '../../src/styles/savannah';
 import { PASTEL_PINK_THEME_ID, PastelPinkTokens } from '../../src/styles/pastelPink';
 import TabTutorialOverlay, { TutorialStep } from '../../src/components/onboarding/TabTutorialOverlay';
 import { useTutorialGuard } from '../../src/hooks/useTutorialGuard';
+import { useWrappedScheduler } from '../../src/hooks/useWrappedScheduler';
+import { CoupleWrappedModal } from '../../src/components/wrapped/CoupleWrappedModal';
 import {
   formatScore,
   getRelationshipTier,
   type OverflowStatus,
 } from '../../src/utils/scoreCalculator';
+import type { OverflowSeverity } from '../../src/engine/metrics';
 
 // ─── FUN-HOM-002: 오버플로우 배너 ───────────────────────────────────────────────
 
 function OverflowBanner({
   status,
+  severity,
   onPressCritical,
   onPressExcess,
+  onPressUnlockHighlight,
+  highlightUnlocking,
+  highlightUnlocked,
 }: {
   status: OverflowStatus;
+  severity?: OverflowSeverity;
   onPressCritical: () => void;
   onPressExcess: () => void;
+  onPressUnlockHighlight: () => void;
+  highlightUnlocking: boolean;
+  highlightUnlocked: boolean;
 }) {
   const pulseOpacity = useSharedValue(1);
+  const isCriticalSeverity = severity === 'CRITICAL';
 
   useEffect(() => {
-    if (status === 'EXCESS_GAIN') {
+    if (status === 'EXCESS_GAIN' || isCriticalSeverity) {
       pulseOpacity.value = withRepeat(
         withSequence(
-          withTiming(0.45, { duration: 750 }),
-          withTiming(1.0, { duration: 750 }),
+          withTiming(0.45, { duration: isCriticalSeverity ? 420 : 750 }),
+          withTiming(1.0, { duration: isCriticalSeverity ? 420 : 750 }),
         ),
         -1,
         false,
@@ -86,16 +100,17 @@ function OverflowBanner({
     } else {
       pulseOpacity.value = 1;
     }
-  }, [status]);
+  }, [status, isCriticalSeverity]);
 
   const pulseStyle = useAnimatedStyle(() => ({ opacity: pulseOpacity.value }));
 
   if (status === 'CRITICAL_LOSS') {
+    // v2.2 §4.3.2: MINOR(옅은 펄스) / MAJOR(그라데이션 보더) / CRITICAL(전면 글래스모피즘+햅틱)
     return (
       <Animated.View
         entering={FadeInDown.duration(380)}
         exiting={FadeOut.duration(250)}
-        style={s.bannerWine}
+        style={[s.bannerWine, isCriticalSeverity && s.bannerWineCritical]}
       >
         <LinearGradient
           colors={['rgba(153,27,27,0.92)', 'rgba(127,29,29,0.95)']}
@@ -103,8 +118,13 @@ function OverflowBanner({
           end={{ x: 1, y: 0 }}
           style={StyleSheet.absoluteFill}
         />
-        {/* 네온 와인 보더 라인 */}
-        <View style={s.bannerWineBorder} />
+        {/* 네온 와인 보더 라인 — MAJOR/CRITICAL일수록 두껍고 선명하게 */}
+        <Animated.View style={[s.bannerWineBorder, isCriticalSeverity && s.bannerWineBorderCritical, isCriticalSeverity && pulseStyle]} />
+        {severity && severity !== 'MINOR' && (
+          <Text style={s.bannerSeverityTag}>
+            {severity === 'CRITICAL' ? '🚨 CRITICAL' : '⚠️ MAJOR'}
+          </Text>
+        )}
         <Text style={s.bannerWineText}>
           오늘 두 분의 대화 온도는 임계점을 넘었습니다.{'\n'}
           시스템이 관계의 급격한 균열을 막기 위해 브레이크를 밟았으니,{' '}
@@ -149,6 +169,19 @@ function OverflowBanner({
             📸 예쁜 말 수집하러 가기
           </Text>
         </TouchableOpacity>
+        {/* FUN-PAY-001 §3: 실시간 단건 결제 모먼트 — 주간 결제 의존도 탈피 */}
+        {(severity === 'MAJOR' || severity === 'CRITICAL') && !highlightUnlocked && (
+          <TouchableOpacity
+            style={s.bannerUnlockBtn}
+            onPress={onPressUnlockHighlight}
+            activeOpacity={0.82}
+            disabled={highlightUnlocking}
+          >
+            <Text style={s.bannerUnlockBtnText}>
+              {highlightUnlocking ? '언락 처리 중...' : '⚡ 하이라이트 카드 즉시 언락'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </Animated.View>
     );
   }
@@ -159,15 +192,16 @@ function OverflowBanner({
 // ─── FUN-HOM-003: DNA 일치율 서클 카드 ──────────────────────────────────────────
 
 function DNAScoreCard() {
-  const { currentScore, themeTokens } = useAppContext();
+  const { currentScore, sLive, themeTokens } = useAppContext();
   const { activeTheme } = useCustomTheme();
   const isOcean = activeTheme?.id === OCEAN_THEME_ID;
   const isSavannah = activeTheme?.id === SAVANNAH_THEME_ID;
   const isPastel = activeTheme?.id === PASTEL_PINK_THEME_ID;
   const t = themeTokens;
 
+  // v2.2: 게이지는 S_Live(실시간 표시 전용), 티어·테마는 S_Current(공식 일치율) 기준
   const tier = getRelationshipTier(currentScore);
-  const displayScore = formatScore(currentScore);
+  const displayScore = formatScore(sLive);
 
   // 글로우 펄스 애니메이션
   const glowScale = useSharedValue(1);
@@ -301,11 +335,16 @@ export default function HomeScreen() {
     partnerProfile,
     themeTokens,
     overflowStatus,
+    overflowSeverity,
     setTriggerMirrorMode,
+    oneTimeHighlightUnlocked,
+    setOneTimeHighlightUnlocked,
   } = useAppContext();
 
   const t = themeTokens;
   const { shouldShow, markDone } = useTutorialGuard('home');
+  const [highlightUnlocking, setHighlightUnlocking] = useState(false);
+  const { wrappedData, visible: wrappedVisible, dismiss: dismissWrapped } = useWrappedScheduler();
 
   // 아코디언 & 링 탭 상태
   const [accordionOpen, setAccordionOpen] = useState(false);
@@ -359,6 +398,22 @@ export default function HomeScreen() {
     router.navigate('/history' as any);
   }, [router]);
 
+  // FUN-PAY-001 §3: 실시간 EXCESS_GAIN 단건 결제 모먼트 — 하이라이트 카드 즉시 언락
+  const handleUnlockHighlightCTA = useCallback(async () => {
+    if (highlightUnlocking || oneTimeHighlightUnlocked) return;
+    setHighlightUnlocking(true);
+    try {
+      await purchaseOneTimeProduct('highlight_unlock_single');
+      setOneTimeHighlightUnlocked(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      const isCancelled = (err as { userCancelled?: boolean }).userCancelled === true;
+      if (!isCancelled) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setHighlightUnlocking(false);
+    }
+  }, [highlightUnlocking, oneTimeHighlightUnlocked, setOneTimeHighlightUnlocked]);
+
   return (
     <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: t.bg }]}>
 
@@ -366,8 +421,12 @@ export default function HomeScreen() {
       {overflowStatus !== 'NONE' && (
         <OverflowBanner
           status={overflowStatus}
+          severity={overflowSeverity}
           onPressCritical={handleCriticalLossCTA}
           onPressExcess={handleExcessGainCTA}
+          onPressUnlockHighlight={handleUnlockHighlightCTA}
+          highlightUnlocking={highlightUnlocking}
+          highlightUnlocked={oneTimeHighlightUnlocked}
         />
       )}
 
@@ -466,6 +525,15 @@ export default function HomeScreen() {
         visible={shouldShow}
         onDone={markDone}
       />
+
+      {/* ── FUN-REP-003: 커플 Wrapped & 기념일 결산 (연말/D+100/D+365 자동 트리거) ── */}
+      <CoupleWrappedModal
+        visible={wrappedVisible}
+        data={wrappedData}
+        myName={myProfile.name}
+        partnerName={partnerProfile.name}
+        onClose={dismissWrapped}
+      />
     </SafeAreaView>
   );
 }
@@ -507,6 +575,26 @@ const s = StyleSheet.create({
     backgroundColor: '#DC2626',
     opacity: 0.9,
   },
+  // v2.2 §4.3.2 CRITICAL 심각도 — 전면 글래스모피즘 강조
+  bannerWineCritical: {
+    borderWidth: 2,
+    borderColor: 'rgba(252,165,165,0.85)',
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  bannerWineBorderCritical: {
+    height: 3,
+    backgroundColor: '#FCA5A5',
+  },
+  bannerSeverityTag: {
+    color: '#FCA5A5',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.extrabold,
+    letterSpacing: 0.6,
+  },
   bannerWineText: {
     color: '#FCA5A5',
     fontSize: FontSize.sm,
@@ -544,6 +632,22 @@ const s = StyleSheet.create({
   },
   bannerBtnText: {
     color: '#FCA5A5',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  bannerUnlockBtn: {
+    alignSelf: 'flex-start',
+    marginTop: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: 'rgba(245,158,11,0.16)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(245,158,11,0.5)',
+  },
+  bannerUnlockBtnText: {
+    color: '#FBBF24',
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
   },

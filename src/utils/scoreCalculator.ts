@@ -1,49 +1,12 @@
 // ─── DNA 일치율 코어 엔진 (Twin.me 2.0) ────────────────────────────────────────
-// SRS §1 정규분포 기반 기준 점수 + §2 24개 마이크로 이벤트 + §3 클램프 필터
-
-// ── 24개 마이크로 이벤트 코드 타입 ──────────────────────────────────────────────
-export type MicroEventCode =
-  | 'G-CON-001' | 'G-CON-002' | 'G-CON-003' | 'G-CON-004'
-  | 'G-REG-001' | 'G-REG-002' | 'G-REG-003' | 'G-REG-004' | 'G-REG-005' | 'G-REG-006'
-  | 'L-MIC-001' | 'L-MIC-002' | 'L-MIC-003' | 'L-MIC-004' | 'L-MIC-005' | 'L-MIC-006'
-  | 'L-CRU-001' | 'L-CRU-002' | 'L-CRU-003' | 'L-CRU-004' | 'L-CRU-005' | 'L-CRU-006';
+// SRS §1 정규분포 기반 기준 점수 + 10단계 마스터 티어 매퍼.
+// (구 v2.1의 24개 마이크로 이벤트·하드 클램프 필터는 v2.2로 완전히 대체되어
+//  src/engine/metrics.ts 로 이관되었다 — docs/Twin.me.md §4 참고.)
 
 export type OverflowStatus = 'CRITICAL_LOSS' | 'EXCESS_GAIN' | 'NONE';
 export type CompatibilityGrade = 'IDEAL' | 'AVERAGE' | 'COLLISION';
 
-// ── 24개 마이크로 이벤트 변동치 딕셔너리 (δ, %) ────────────────────────────────
-export const MICRO_EVENT_DELTAS: Record<MicroEventCode, number> = {
-  // 관계 회복 및 대화 교정 군 (+)
-  'G-CON-001': 0.25,
-  'G-CON-002': 0.25,
-  'G-CON-003': 0.20,
-  'G-CON-004': 0.30,
-  // 다정함 및 동기화 수집 군 (+)
-  'G-REG-001': 0.10,
-  'G-REG-002': 0.10,
-  'G-REG-003': 0.05,
-  'G-REG-004': 0.05,
-  'G-REG-005': 0.15,
-  'G-REG-006': 0.05,
-  // 소통 저해 및 매너리즘 군 (-)
-  'L-MIC-001': -0.15,
-  'L-MIC-002': -0.10,
-  'L-MIC-003': -0.05,
-  'L-MIC-004': -0.10,
-  'L-MIC-005': -0.05,
-  'L-MIC-006': -0.10,
-  // 관계 균열 및 의도적 파괴 군 (-)
-  'L-CRU-001': -0.30,
-  'L-CRU-002': -0.30,
-  'L-CRU-003': -0.25,
-  'L-CRU-004': -0.25,
-  'L-CRU-005': -0.20,
-  'L-CRU-006': -0.20,
-};
-
 // ── 물리 상수 ──────────────────────────────────────────────────────────────────
-const CLAMP_MIN = -1.0;
-const CLAMP_MAX = 1.0;
 const SCORE_FLOOR = 50.5;
 const SCORE_PRE_INTERVIEW_CEILING = 89.5;
 const INTERVIEW_MAX_BONUS = 5.0;
@@ -118,27 +81,6 @@ export function generateBaseScore(
 export function computeMasterBase(sBase: number, interviewBonus: number): number {
   const clampedBonus = Math.max(0, Math.min(INTERVIEW_MAX_BONUS, interviewBonus));
   return sBase + clampedBonus;
-}
-
-// ── [수식 3-2] 하루 등락폭 Clamp 필터 + 오버플로우 감지 ─────────────────────────
-export function computeDailyDelta(events: MicroEventCode[]): {
-  rawSum: number;
-  clamped: number;
-  overflowStatus: OverflowStatus;
-} {
-  const rawSum = events.reduce((acc, code) => acc + MICRO_EVENT_DELTAS[code], 0);
-  const clamped = Math.max(CLAMP_MIN, Math.min(CLAMP_MAX, rawSum));
-
-  let overflowStatus: OverflowStatus = 'NONE';
-  if (rawSum < CLAMP_MIN) overflowStatus = 'CRITICAL_LOSS';
-  else if (rawSum > CLAMP_MAX) overflowStatus = 'EXCESS_GAIN';
-
-  return { rawSum, clamped, overflowStatus };
-}
-
-// ── 현재 스코어에 일일 delta 적용 (바닥·천장 가드 포함) ────────────────────────
-export function applyScoreDelta(currentScore: number, delta: number): number {
-  return Math.max(SCORE_FLOOR, Math.min(100, currentScore + delta));
 }
 
 // ── 전체 앱 UI 포맷 함수: 소수점 한 자리 고정 ────────────────────────────────

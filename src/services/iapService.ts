@@ -157,7 +157,9 @@ export async function getAvailableSubscriptions(): Promise<StoreProduct[]> {
         productId: IAP_SKUS.deep,
         localizedPrice: '₩29,900/월',
         title: 'Deep Talk Night',
-        description: '취중진담 연출 + 속마음 브리핑 리포트 + 보이스 클로닝',
+        // ⚠️ HOLD (SRS 보강판 #1 §3.4): '속마음 브리핑 리포트'는 거울 철학과 충돌
+        // 개연성이 있어 창업가 의사결정 전까지 문구에서 격리됨.
+        description: '취중진담 연출 + 고음질 보이스 클로닝 (무제한)',
       },
     ];
   }

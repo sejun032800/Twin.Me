@@ -2680,16 +2680,27 @@ async function requestAccountDeletionToServer(): Promise<void> {
   console.log('[AccountPurge] Permanent account deletion request dispatched to server.');
 }
 
+// SRS 보강판 #1 §B.5 — 우아한 해지(Churn): 공유 메모리 즉시 삭제 대신 유예 기간 부여
+const COUPLE_UNLINK_GRACE_DAYS = 90;
+
+async function requestCoupleUnlinkToServer(): Promise<void> {
+  // TODO: wire to POST /api/v1/couples/me/unlink — server starts the grace-period
+  // retention timer (Couple_ID 공유 메모리는 COUPLE_UNLINK_GRACE_DAYS 후 영구 파기)
+  console.log(`[CoupleUnlink] Couple disconnect requested — shared memory retained for ${COUPLE_UNLINK_GRACE_DAYS} days.`);
+}
+
 // ─── Settings Footer ──────────────────────────────────────────────────────────
 
 function SettingsFooter({ t }: { t: ThemeTokens }) {
-  const { resetSession, purgeAccount } = useAppContext();
+  const { resetSession, purgeAccount, unlinkCouple, partnerProfile } = useAppContext();
   const router = useRouter();
 
   const [isLoggingOut, setIsLoggingOut]   = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting]          = useState(false);
+  const [showUnlinkModal, setShowUnlinkModal] = useState(false);
+  const [isUnlinking, setIsUnlinking]        = useState(false);
 
   const executeLogout = async () => {
     setShowLogoutConfirm(false);
@@ -2709,6 +2720,18 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
     }
     purgeAccount();
     router.replace('/(auth)/splash');
+  };
+
+  const handleCoupleUnlink = async () => {
+    setIsUnlinking(true);
+    try {
+      await requestCoupleUnlinkToServer();
+    } catch {
+      // Server failure is non-blocking — local unlink proceeds regardless
+    }
+    unlinkCouple();
+    setIsUnlinking(false);
+    setShowUnlinkModal(false);
   };
 
   return (
@@ -2737,6 +2760,23 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
         ) : (
           <Text style={ftS.logoutText}>로그아웃</Text>
         )}
+      </Pressable>
+
+      {/* ── 커플 연결 해제 버튼 — amber, 로그아웃/계정삭제 사이 severity ── */}
+      <Pressable
+        style={({ pressed }) => [
+          ftS.unlinkBtn,
+          pressed && !isUnlinking && { opacity: 0.7 },
+          isUnlinking && { opacity: 0.5 },
+        ]}
+        onPress={() => {
+          if (isLoggingOut || isDeleting || isUnlinking) return;
+          triggerHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+          setShowUnlinkModal(true);
+        }}
+        disabled={isLoggingOut || isDeleting || isUnlinking}
+      >
+        <Text style={ftS.unlinkText}>커플 연결 해제</Text>
       </Pressable>
 
       {/* ── 계정 삭제 버튼 — neon natural red #FF4D4D ───────────────── */}
@@ -2770,6 +2810,56 @@ function SettingsFooter({ t }: { t: ThemeTokens }) {
             </Pressable>
             <Pressable style={styles.modalCancelBtn} onPress={() => setShowLogoutConfirm(false)}>
               <Text style={[styles.modalCancelText, { color: t.textMuted }]}>아니요, 계속 함께할게요</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 커플 연결 해제 모달 (SRS 보강판 #1 §B.5 우아한 해지) ─────────
+          즉시 삭제 대신 유예(Grace) 기간 고지 + 데이터 주권 안내 ───────── */}
+      <Modal visible={showUnlinkModal} transparent animationType="slide">
+        <View style={ftS.deleteModalOverlay}>
+          <View style={[ftS.unlinkModalSheet, { backgroundColor: t.card, borderColor: 'rgba(245,158,11,0.22)' }]}>
+            <Text style={ftS.deleteModalEmoji}>🔗💔</Text>
+            <Text style={[ftS.deleteModalTitle, { color: t.text }]}>
+              {partnerProfile.name ? `${partnerProfile.name}와(과)의 연결을 해제할까요?` : '커플 연결을 해제할까요?'}
+            </Text>
+            <View style={ftS.unlinkWarnBox}>
+              <Text style={[ftS.unlinkWarnTitle, { color: '#F59E0B' }]}>🕊️ 데이터 주권 안내</Text>
+              <Text style={[ftS.deleteWarnText, { color: t.textSecondary }]}>
+                연결을 해제해도 두 분의 추억은 곧바로 지워지지 않아요. 공유 메모리와 지도 핀, 리포트 기록은{' '}
+                <Text style={{ fontWeight: FontWeight.bold, color: t.text }}>{COUPLE_UNLINK_GRACE_DAYS}일간 유예 보관</Text>
+                {' '}되며, 그 사이 언제든 다시 연결하거나 내 데이터만 따로 내보낼 수 있어요. 유예 기간이 지나면 공유 데이터는 영구 파기됩니다.
+              </Text>
+            </View>
+
+            {/* 이탈 억제 — 가장 눈에 띄는 프리미엄 CTA */}
+            <LinearGradient
+              colors={['#7C3AED', '#D946EF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={ftS.deleteStayBtnGrad}
+            >
+              <Pressable
+                style={ftS.deleteStayBtn}
+                onPress={() => setShowUnlinkModal(false)}
+                disabled={isUnlinking}
+              >
+                <Text style={ftS.deleteStayText}>아니요, 계속 연결할게요</Text>
+              </Pressable>
+            </LinearGradient>
+
+            {/* 해제 강행 — 톤 다운, 삭제(빨강)와 구분되는 앰버 */}
+            <Pressable
+              style={[ftS.unlinkConfirmBtn, isUnlinking && { opacity: 0.5 }]}
+              onPress={handleCoupleUnlink}
+              disabled={isUnlinking}
+            >
+              {isUnlinking ? (
+                <ActivityIndicator size="small" color="#F59E0B" />
+              ) : (
+                <Text style={ftS.unlinkConfirmText}>연결 해제하고 유예 기간 시작하기</Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -2865,6 +2955,67 @@ const ftS = StyleSheet.create({
     fontSize: FontSize.base,
     fontWeight: FontWeight.semibold,
     letterSpacing: 0.3,
+  },
+  // ── 커플 연결 해제 버튼 — amber, 로그아웃/계정삭제 사이 ─────────────
+  unlinkBtn: {
+    width: '100%',
+    paddingVertical: 15,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.28)',
+    backgroundColor: 'rgba(245,158,11,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  unlinkText: {
+    color: '#F59E0B',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.3,
+  },
+  // ── 커플 연결 해제 모달 (그레이스 기간 고지) ─────────────────────────
+  unlinkModalSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xl,
+    paddingBottom: 40,
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  unlinkWarnBox: {
+    backgroundColor: 'rgba(245,158,11,0.06)',
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.22)',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    width: '100%',
+    gap: 6,
+  },
+  unlinkWarnTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.1,
+  },
+  unlinkConfirmBtn: {
+    width: '100%',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(120,72,8,0.20)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.40)',
+    marginTop: 4,
+  },
+  unlinkConfirmText: {
+    color: '#F59E0B',
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: 0.15,
   },
   // ── 계정 삭제 버튼 — neon natural red ───────────────────────────────
   deleteBtn: {

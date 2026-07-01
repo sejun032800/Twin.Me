@@ -20,8 +20,19 @@ import {
   shouldFireWeeklyReport,
   LOADING_PLACEHOLDER,
 } from '../services/weeklyReportService';
+import { parseKakaoExport } from '../lib/kakaoParser';
+import { runKakaoBatchDetection } from '../services/kakaoBatchDetectionService';
 
 const SCHEDULE_CHECK_INTERVAL_MS = 60 * 1000; // 1-minute heartbeat
+
+// Twin Response Logic — 경로 A(카톡 업로드 배치) 반복 패턴 TOP 3 요약 카피
+function formatBatchSummary(topPatterns: { label: string; count: number }[]): string {
+  if (topPatterns.length === 0) {
+    return '이번 카톡 학습에서는 두드러진 반복 습관이 감지되지 않았어요. 안정적인 대화를 이어가고 있네요 🌿';
+  }
+  const lines = topPatterns.map((p, i) => `${i + 1}위. ${p.label} (${p.count}회)`);
+  return `카톡 대화 학습 완료 — 최근 기간 반복 언어 습관 TOP ${topPatterns.length} 📊\n${lines.join('\n')}`;
+}
 
 export function useReportScheduler(): void {
   const {
@@ -30,6 +41,7 @@ export function useReportScheduler(): void {
     partnerProfile,
     weeklyReportData,
     setWeeklyReportData,
+    setSelfAiNotifyQueue,
   } = useAppContext();
 
   const isGeneratingRef = useRef(false);
@@ -60,6 +72,27 @@ export function useReportScheduler(): void {
     [myProfile, partnerProfile, setWeeklyReportData],
   );
 
+  // ── Twin Response Logic §2 (경로 A: 카톡 업로드 배치) ────────────────────────
+  // 온보딩/재업로드 시 이미 마스킹된 내 발화(myLines)만으로 v2.2 이벤트 코드를
+  // 라벨링해 반복 패턴(TOP 3)을 산출하고, 룸 3(분석가)에 사후 요약 카드를 큐잉한다.
+  const runBatchDetection = useCallback(
+    (rawText: string) => {
+      const { myLines } = parseKakaoExport(rawText, myProfile.name);
+      if (myLines.length === 0) return;
+      const result = runKakaoBatchDetection(myLines);
+      setSelfAiNotifyQueue((prev) => [
+        ...prev,
+        {
+          id: `kakao-batch-${Date.now()}`,
+          targetRoom: 'analyst' as const,
+          text: formatBatchSummary(result.topPatterns),
+          timestamp: Date.now(),
+        },
+      ]);
+    },
+    [myProfile.name, setSelfAiNotifyQueue],
+  );
+
   // ── Cold-start: hydrate from FileSystem cache ────────────────────────────────
 
   useEffect(() => {
@@ -86,7 +119,8 @@ export function useReportScheduler(): void {
     // New or changed text — trigger immediately
     prevRawTextRef.current = rawKakaoText;
     triggerGeneration(rawKakaoText);
-  }, [rawKakaoText, triggerGeneration]);
+    runBatchDetection(rawKakaoText);
+  }, [rawKakaoText, triggerGeneration, runBatchDetection]);
 
   // ── Sunday 22:00 recurring scheduler ────────────────────────────────────────
 

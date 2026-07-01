@@ -10,6 +10,20 @@ import {
   ChatStyleProfile,
   DEFAULT_CHAT_STYLE_PROFILE,
 } from '../lib/kakaoParser';
+import type { UserToneVector } from '../lib/userToneVectorBuilder';
+import {
+  loadUserToneVector,
+  saveUserToneVector,
+  clearUserToneVector,
+} from '../services/userToneVectorStore';
+import type { UserPersonaMatrix } from '../types/genesis';
+import {
+  loadPersonaMatrix,
+  savePersonaMatrix,
+  clearPersonaMatrix,
+  loadLastGenesisAt,
+  saveLastGenesisAt,
+} from '../services/personaMatrixStore';
 import {
   FALLBACK_MOOD_TAGS,
   PartnerAiMoodTag,
@@ -77,6 +91,8 @@ export type { WeeklyReportData };
 export type { SubscriptionStatus };
 
 export type { ChatStyleProfile };
+export type { UserToneVector };
+export type { UserPersonaMatrix };
 export type { KakaoSyncRecord };
 export type { HighlightCard };
 export type { OverflowStatus };
@@ -208,6 +224,20 @@ interface AppContextValue {
   // Chat rhythm profile — derived from KakaoTalk analysis, updated via rolling avg
   chatStyleProfile: ChatStyleProfile;
   setChatStyleProfile: (p: ChatStyleProfile) => void;
+  // Chat_logic.md — User_Tone_Vector (laughter/endings/drips/emoji/lexical).
+  // Persisted to AsyncStorage; null until onboarding's loading screen builds it.
+  userToneVector: UserToneVector | null;
+  setUserToneVector: (v: UserToneVector | null) => void;
+  // 트윈 제네시스 인터뷰 엔진 (FUN-HOM-001 Override) — User_Persona_Matrix.
+  // null = 아직 인터뷰를 완료하지 않은 "무정형 점토" 상태.
+  personaMatrix: UserPersonaMatrix | null;
+  // 인터뷰 완료(엔딩 세리머니) 시 호출 — personaMatrix 확정 + lastGenesisAt 갱신 + 영속화.
+  completeGenesisInterview: (matrix: UserPersonaMatrix) => void;
+  // 재인터뷰(Re-genesis) — 말투 데이터(User_Tone_Vector)는 유지, 성향 데이터만 초기화.
+  // 남용 방지 쿨다운 가드는 canRequestRegenesis로 UI에서 먼저 확인한다.
+  lastGenesisAt: string | null;
+  canRequestRegenesis: boolean;
+  requestRegenesis: () => void;
   // Privacy control (FUN-SET-001)
   privacyLevel: PrivacyLevel;
   setPrivacyLevel: (level: PrivacyLevel) => void;
@@ -432,6 +462,13 @@ const AppContext = createContext<AppContextValue>({
   setRawKakaoText: () => {},
   chatStyleProfile: DEFAULT_CHAT_STYLE_PROFILE,
   setChatStyleProfile: () => {},
+  userToneVector: null,
+  setUserToneVector: () => {},
+  personaMatrix: null,
+  completeGenesisInterview: () => {},
+  lastGenesisAt: null,
+  canRequestRegenesis: true,
+  requestRegenesis: () => {},
   privacyLevel: 3,
   setPrivacyLevel: () => {},
   dateCourses: MOCK_COURSES,
@@ -531,6 +568,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [trainingResult, setTrainingResult] = useState<TrainingResult | null>(null);
   const [rawKakaoText, setRawKakaoText] = useState<string | null>(null);
   const [chatStyleProfile, setChatStyleProfile] = useState<ChatStyleProfile>(DEFAULT_CHAT_STYLE_PROFILE);
+  const [userToneVector, setUserToneVectorState] = useState<UserToneVector | null>(null);
+  const [personaMatrix, setPersonaMatrixState] = useState<UserPersonaMatrix | null>(null);
+  const [lastGenesisAt, setLastGenesisAt] = useState<string | null>(null);
   const [privacyLevel, setPrivacyLevel] = useState<PrivacyLevel>(3);
   const [dateCourses, setDateCourses] = useState<DateCourse[]>(MOCK_COURSES);
   const [triggerAddCourse, setTriggerAddCourse] = useState(false);
@@ -617,6 +657,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setCoupleInfo = (info: Partial<CoupleInfo>) =>
     setCoupleInfoState((prev) => ({ ...prev, ...info }));
+
+  // Chat_logic.md §5.2 — persistence follows privacy level: Lv1(보호)에서는
+  // 온보딩 스냅샷만 유지하고 이후 갱신을 저장하지 않는다(리스너 종료).
+  const setUserToneVector = (v: UserToneVector | null) => {
+    setUserToneVectorState(v);
+    if (v && privacyLevel !== 1) {
+      saveUserToneVector(v);
+    } else if (!v) {
+      clearUserToneVector();
+    }
+  };
+
+  // ── 트윈 제네시스 인터뷰 엔진: User_Persona_Matrix 확정 + Re-genesis 가드 ────
+  // §5.2 남용 방지 가드 — 무분별한 리셋으로 페르소나 데이터가 오염되는 것을 막는 쿨다운.
+  const REGENESIS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7일
+
+  const canRequestRegenesis = React.useMemo(() => {
+    if (!lastGenesisAt) return true;
+    return Date.now() - new Date(lastGenesisAt).getTime() >= REGENESIS_COOLDOWN_MS;
+  }, [lastGenesisAt]);
+
+  const completeGenesisInterview = (matrix: UserPersonaMatrix) => {
+    const completedAt = matrix.completedAt ?? new Date().toISOString();
+    const finalized = { ...matrix, completedAt };
+    setPersonaMatrixState(finalized);
+    setLastGenesisAt(completedAt);
+    savePersonaMatrix(finalized);
+    saveLastGenesisAt(completedAt);
+  };
+
+  // 자산 격리 리셋: User_Tone_Vector는 그대로 두고 성향 데이터만 무채색 점토로 초기화.
+  const requestRegenesis = () => {
+    setPersonaMatrixState(null);
+    clearPersonaMatrix();
+  };
 
   // ── FUN-HIS-006: Map Layer CRUD ──────────────────────────────────────────────
   const addPlanLayer = (name: string) => {
@@ -855,6 +930,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTrainingResult(null);
     setRawKakaoText(null);
     setChatStyleProfile(DEFAULT_CHAT_STYLE_PROFILE);
+    setUserToneVectorState(null);
+    clearUserToneVector();
+    setPersonaMatrixState(null);
+    clearPersonaMatrix();
+    setLastGenesisAt(null);
     setPrivacyLevel(3);
     setDateCourses(MOCK_COURSES);
     setTriggerAddCourse(false);
@@ -915,6 +995,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTrainingResult(null);
     setRawKakaoText(null);
     setChatStyleProfile(DEFAULT_CHAT_STYLE_PROFILE);
+    setUserToneVectorState(null);
+    clearUserToneVector();
+    setPersonaMatrixState(null);
+    clearPersonaMatrix();
+    setLastGenesisAt(null);
     setPrivacyLevel(3);
     setDateCourses([]);
     setTriggerAddCourse(false);
@@ -994,6 +1079,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Hydrate persisted User_Tone_Vector from AsyncStorage on app launch (Chat_logic.md)
+  useEffect(() => {
+    loadUserToneVector().then((vector) => {
+      if (vector) setUserToneVectorState(vector);
+    });
+  }, []);
+
+  // Hydrate persisted User_Persona_Matrix + Re-genesis cooldown timestamp (FUN-HOM-001 Override)
+  useEffect(() => {
+    loadPersonaMatrix().then((matrix) => {
+      if (matrix) setPersonaMatrixState(matrix);
+    });
+    loadLastGenesisAt().then((ts) => {
+      if (ts) setLastGenesisAt(ts);
+    });
+  }, []);
+
   // Seed the partner-review service store whenever dateCourses changes.
   // Courses that already carry a kakaoPlaceId and a real partnerRating
   // are registered so AddCourseSheet can display them reactively.
@@ -1034,6 +1136,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setRawKakaoText,
         chatStyleProfile,
         setChatStyleProfile,
+        userToneVector,
+        setUserToneVector,
+        personaMatrix,
+        completeGenesisInterview,
+        lastGenesisAt,
+        canRequestRegenesis,
+        requestRegenesis,
         privacyLevel,
         setPrivacyLevel,
         dateCourses,

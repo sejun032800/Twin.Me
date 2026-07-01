@@ -1,14 +1,21 @@
+// ─── 트윈 제네시스 인터뷰 엔진 — 통화 UI 오버라이드 (FUN-HOM-001 Override) ─────
+// 전화 수신 UI 셸은 유지하되, 내부 진행은 useGenesisInterview 상태 머신이 구동한다.
+// 인터뷰어는 "갓 태어난 트윈 본인" — 모든 카피는 단정이 아닌 제안+확인 톤.
+
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
   PermissionsAndroid,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -23,31 +30,21 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useAppContext } from '../../context/AppContext';
+import { useGenesisInterview } from '../../hooks/useGenesisInterview';
+import { CLAY_STAGE_LABEL, GenesisAct } from '../../types/genesis';
+import ClayTwinAvatar from './ClayTwinAvatar';
 import { Colors, Gradients } from '../../styles/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Phase = 'incoming' | 'active' | 'completed';
 
-// ── Mock interview questions ───────────────────────────────────────────────────
-// Real implementation: feed these as system prompts to GPT-4o Realtime API
-// wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17
-const MOCK_QUESTIONS = [
-  {
-    text: '"연애에서 가장 중요하게 생각하는 가치가 뭐야?\n솔직하게 말해줘. 💬"',
-    hint: '자유롭게 말하면 돼. 내가 듣고 있어.',
-    duration: 8000,
-  },
-  {
-    text: '"최근 파트너와 가장 기억에 남았던 순간을\n떠올려봐. 어떤 느낌이었어? ✨"',
-    hint: '그 감정을 그대로 표현해줘.',
-    duration: 8000,
-  },
-  {
-    text: '"이 관계에서 더 깊어지고 싶은 부분이\n있다면 솔직하게 이야기해봐. 🤍"',
-    hint: '편하게 이야기해줘.',
-    duration: 8000,
-  },
-] as const;
+const ACT_LABEL: Record<GenesisAct, string> = {
+  1: '1막 · 잡담',
+  2: '2막 · 개인 성향',
+  3: '3막 · 연애 성향',
+  4: '4막 · 엔딩',
+};
 
 // ── Mic permission ─────────────────────────────────────────────────────────────
 async function requestMicPermission(): Promise<boolean> {
@@ -67,42 +64,7 @@ async function requestMicPermission(): Promise<boolean> {
       return false;
     }
   }
-  // iOS: permission is prompted by the OS on first audio access
   return true;
-}
-
-// ── Voice session controller (mock) ───────────────────────────────────────────
-// Architecture stub — replace body with:
-//   const ws = new WebSocket('wss://api.openai.com/v1/realtime?...');
-//   ws.onopen = () => ws.send(JSON.stringify({ type: 'session.create', ... }));
-//   ws.onmessage = (e) => { /* stream AI audio delta back to device speaker */ };
-function startAiVoiceInterviewSession(
-  onQuestionAdvance: (idx: number) => void,
-  onSessionEnd: () => void,
-): () => void {
-  let idx = 0;
-  let cancelled = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const next = () => {
-    if (cancelled) return;
-    if (idx >= MOCK_QUESTIONS.length) {
-      onSessionEnd();
-      return;
-    }
-    onQuestionAdvance(idx);
-    const duration = MOCK_QUESTIONS[idx].duration;
-    timer = setTimeout(() => {
-      idx += 1;
-      next();
-    }, duration);
-  };
-
-  next();
-  return () => {
-    cancelled = true;
-    if (timer !== null) clearTimeout(timer);
-  };
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -115,8 +77,10 @@ interface Props {
 const BTN_SIZE = 72;
 
 export default function InterviewCallModal({ visible, onCompleted, onClose }: Props) {
+  const { myProfile, completeGenesisInterview, setHasCompletedInterview } = useAppContext();
+  const genesis = useGenesisInterview(myProfile.mbti);
   const [phase, setPhase] = useState<Phase>('incoming');
-  const [currentQ, setCurrentQ] = useState(0);
+  const [typedText, setTypedText] = useState('');
   const cancelRef = useRef<(() => void) | null>(null);
 
   // shared values
@@ -136,9 +100,8 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
   useEffect(() => {
     if (!visible) return;
 
-    // Reset
     setPhase('incoming');
-    setCurrentQ(0);
+    setTypedText('');
     progressVal.value = 0;
     qOpacity.value = 0;
     qY.value = 16;
@@ -149,48 +112,27 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
     ring2.value = 1;
     declinePulse.value = 1;
 
-    // Fade in
     overlayOpacity.value = withTiming(1, { duration: 350 });
     cardScale.value = withSpring(1, { damping: 18, stiffness: 200 });
 
-    // Accept button pulse
     acceptPulse.value = withRepeat(
       withSequence(
         withTiming(1.12, { duration: 600, easing: Easing.out(Easing.sin) }),
         withTiming(1, { duration: 600, easing: Easing.in(Easing.sin) }),
       ),
-      -1,
-      false,
+      -1, false,
     );
-    // Ring 1: spreads from 1x to 1.7x then instantly resets
     ring1.value = withRepeat(
-      withSequence(
-        withTiming(1.7, { duration: 1100, easing: Easing.out(Easing.cubic) }),
-        withTiming(1, { duration: 0 }),
-      ),
-      -1,
-      false,
+      withSequence(withTiming(1.7, { duration: 1100, easing: Easing.out(Easing.cubic) }), withTiming(1, { duration: 0 })),
+      -1, false,
     );
-    // Ring 2: offset by 450ms for stagger
-    ring2.value = withDelay(
-      450,
-      withRepeat(
-        withSequence(
-          withTiming(2.0, { duration: 1100, easing: Easing.out(Easing.cubic) }),
-          withTiming(1, { duration: 0 }),
-        ),
-        -1,
-        false,
-      ),
-    );
-    // Decline button subtle pulse
+    ring2.value = withDelay(450, withRepeat(
+      withSequence(withTiming(2.0, { duration: 1100, easing: Easing.out(Easing.cubic) }), withTiming(1, { duration: 0 })),
+      -1, false,
+    ));
     declinePulse.value = withRepeat(
-      withSequence(
-        withTiming(1.08, { duration: 700, easing: Easing.out(Easing.sin) }),
-        withTiming(1, { duration: 700, easing: Easing.in(Easing.sin) }),
-      ),
-      -1,
-      false,
+      withSequence(withTiming(1.08, { duration: 700, easing: Easing.out(Easing.sin) }), withTiming(1, { duration: 700, easing: Easing.in(Easing.sin) })),
+      -1, false,
     );
 
     return () => {
@@ -198,68 +140,71 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
     };
   }, [visible]);
 
+  // 진행도 → 프로그레스 바 애니메이션 동기화
+  useEffect(() => {
+    if (phase === 'active') {
+      progressVal.value = withTiming(genesis.progress, { duration: 400, easing: Easing.out(Easing.quad) });
+    }
+  }, [genesis.progress, phase]);
+
+  // 질문이 바뀔 때마다 카드 페이드 트랜지션
+  const prevQuestionId = useRef<string | null>(null);
+  useEffect(() => {
+    const id = genesis.currentQuestion?.id ?? null;
+    if (id !== prevQuestionId.current) {
+      prevQuestionId.current = id;
+      setTypedText('');
+      qOpacity.value = 0;
+      qY.value = 10;
+      qOpacity.value = withTiming(1, { duration: 400 });
+      qY.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) });
+    }
+  }, [genesis.currentQuestion?.id]);
+
+  // 4막 엔딩 세리머니 도달 → 완료 처리
+  useEffect(() => {
+    if (genesis.phase === 'ceremony' && phase === 'active') {
+      const matrix = genesis.finalizePersonaMatrix();
+      completeGenesisInterview(matrix);
+      setHasCompletedInterview(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      setPhase('completed');
+      progressVal.value = withTiming(100, { duration: 500 });
+      tickOpacity.value = withDelay(300, withTiming(1, { duration: 400 }));
+      tickScale.value = withDelay(300, withSpring(1, { damping: 12, stiffness: 180 }));
+
+      setTimeout(() => {
+        onCompleted();
+        overlayOpacity.value = withTiming(0, { duration: 500 }, (finished) => {
+          'worklet';
+          if (finished) runOnJS(onClose)();
+        });
+      }, 2600);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genesis.phase, phase]);
+
   // ── Accept handler ───────────────────────────────────────────────────────────
   const handleAccept = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     const granted = await requestMicPermission();
     if (!granted) {
-      Alert.alert('마이크 접근 필요', '인터뷰를 진행하려면 마이크 접근을 허용해주세요.', [
-        { text: '확인' },
-      ]);
+      Alert.alert('마이크 접근 필요', '인터뷰를 진행하려면 마이크 접근을 허용해주세요.', [{ text: '확인' }]);
       return;
     }
 
     setPhase('active');
-
-    // Mic blink animation
     micOpacity.value = withRepeat(
       withSequence(withTiming(0.3, { duration: 600 }), withTiming(1, { duration: 600 })),
-      -1,
-      false,
+      -1, false,
     );
-
-    // First question card slides in
     qOpacity.value = withTiming(1, { duration: 400 });
     qY.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) });
 
-    const cancel = startAiVoiceInterviewSession(
-      (idx) => {
-        // Fade out → update question → fade in
-        qOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-          'worklet';
-          if (finished) {
-            runOnJS(setCurrentQ)(idx);
-            qOpacity.value = withTiming(1, { duration: 400 });
-          }
-        });
-        qY.value = withSequence(
-          withTiming(10, { duration: 200 }),
-          withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) }),
-        );
-        progressVal.value = withTiming((idx / MOCK_QUESTIONS.length) * 100, {
-          duration: 500,
-          easing: Easing.out(Easing.quad),
-        });
-      },
-      () => {
-        // All questions answered
-        setPhase('completed');
-        progressVal.value = withTiming(100, { duration: 500 });
-        tickOpacity.value = withDelay(300, withTiming(1, { duration: 400 }));
-        tickScale.value = withDelay(300, withSpring(1, { damping: 12, stiffness: 180 }));
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-        setTimeout(() => {
-          onCompleted(); // triggers AccuracyBanner dissolve + score update
-          overlayOpacity.value = withTiming(0, { duration: 500 }, (finished) => {
-            'worklet';
-            if (finished) runOnJS(onClose)();
-          });
-        }, 2500);
-      },
-    );
-    cancelRef.current = cancel;
+    genesis.start();
+    cancelRef.current = () => {};
   };
 
   // ── Decline / end call handler ───────────────────────────────────────────────
@@ -272,15 +217,33 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
     });
   };
 
+  const handleSubmitTyped = () => {
+    if (!typedText.trim()) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    genesis.submitTranscript(typedText.trim());
+  };
+
+  const handleQuickReply = (label: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    genesis.submitTranscript(label);
+  };
+
+  const handleConfirmYes = () => {
+    if (!genesis.pendingConfirm) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    genesis.confirmArchetype(genesis.pendingConfirm.archetype.id);
+  };
+
+  const handleConfirmOverride = (archetypeId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    genesis.confirmArchetype(archetypeId);
+  };
+
   // ── Animated styles ──────────────────────────────────────────────────────────
   const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }));
   const cardStyle = useAnimatedStyle(() => ({ transform: [{ scale: cardScale.value }] }));
-  const acceptBtnStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: acceptPulse.value }],
-  }));
-  const declineBtnStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: declinePulse.value }],
-  }));
+  const acceptBtnStyle = useAnimatedStyle(() => ({ transform: [{ scale: acceptPulse.value }] }));
+  const declineBtnStyle = useAnimatedStyle(() => ({ transform: [{ scale: declinePulse.value }] }));
   const ring1Style = useAnimatedStyle(() => ({
     transform: [{ scale: ring1.value }],
     opacity: interpolate(ring1.value, [1, 1.7], [0.45, 0]),
@@ -293,75 +256,116 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
     opacity: qOpacity.value,
     transform: [{ translateY: qY.value }],
   }));
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progressVal.value}%` as any,
-  }));
+  const progressStyle = useAnimatedStyle(() => ({ width: `${progressVal.value}%` as any }));
   const tickStyle = useAnimatedStyle(() => ({
     opacity: tickOpacity.value,
     transform: [{ scale: tickScale.value }],
   }));
   const micStyle = useAnimatedStyle(() => ({ opacity: micOpacity.value }));
 
-  const q = MOCK_QUESTIONS[Math.min(currentQ, MOCK_QUESTIONS.length - 1)];
+  const isConfirming = genesis.phase === 'confirming' && !!genesis.pendingConfirm;
 
   return (
     <Modal transparent statusBarTranslucent animationType="none" visible={visible}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
       <Animated.View style={[styles.overlay, overlayStyle]}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         <Animated.View style={[styles.card, cardStyle]}>
 
-          {/* ── Avatar ── */}
-          <LinearGradient
-            colors={Gradients.TWIN_PRIMARY.colors}
-            start={Gradients.TWIN_PRIMARY.start}
-            end={Gradients.TWIN_PRIMARY.end}
-            style={styles.avatarRing}
-          >
-            <View style={styles.avatarInner}>
-              <Text style={styles.avatarEmoji}>🤖</Text>
-            </View>
-          </LinearGradient>
+          <ClayTwinAvatar stage={genesis.clayStage} pulseSignal={genesis.pulseSignal} size={116} />
 
-          <Text style={styles.callerName}>연애 분석가 트윈이</Text>
+          <Text style={styles.callerName}>
+            {phase === 'incoming' ? '갓 태어난 트윈이' : CLAY_STAGE_LABEL[genesis.clayStage]}
+          </Text>
 
           <Text style={styles.statusText}>
             {phase === 'incoming' && '전화가 걸려오는 중...'}
-            {phase === 'active' && `인터뷰 진행 중 · ${currentQ + 1} / ${MOCK_QUESTIONS.length}`}
+            {phase === 'active' && `${ACT_LABEL[genesis.act]} · ${genesis.progress}%`}
             {phase === 'completed' && 'AI 정확도 95% 달성! 🎉'}
           </Text>
 
-          {/* ── Progress bar ── */}
           {phase !== 'incoming' && (
             <View style={styles.progressTrack}>
               <Animated.View style={[styles.progressFill, progressStyle]}>
-                <LinearGradient
-                  colors={Gradients.TWIN_PRIMARY.colors}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={StyleSheet.absoluteFill}
-                />
+                <LinearGradient colors={Gradients.TWIN_PRIMARY.colors} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
               </Animated.View>
             </View>
           )}
 
-          {/* ── Active: question card ── */}
-          {phase === 'active' && (
+          {/* ── Active: 되짚기(confirm) 단계 ── */}
+          {phase === 'active' && isConfirming && genesis.pendingConfirm && (
             <Animated.View style={[styles.questionCard, qCardStyle]}>
-              <Text style={styles.questionText}>{q.text}</Text>
-              <Text style={styles.questionHint}>{q.hint}</Text>
-              <Animated.Text style={[styles.micText, micStyle]}>🎙️ 말하는 중...</Animated.Text>
+              <Text style={styles.confirmLabel}>아, 그러니까...</Text>
+              <Text style={styles.questionText}>"{genesis.pendingConfirm.archetype.label}"라는 거지?</Text>
+              <View style={styles.confirmRow}>
+                <Pressable style={styles.confirmYesBtn} onPress={handleConfirmYes}>
+                  <Text style={styles.confirmYesText}>응 맞아</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.confirmOtherLabel}>아니면, 이게 더 맞아?</Text>
+              <View style={styles.chipRow}>
+                {genesis.pendingConfirm.question.archetypes
+                  .filter((a) => a.id !== genesis.pendingConfirm?.archetype.id)
+                  .map((a) => (
+                    <Pressable key={a.id} style={styles.chip} onPress={() => handleConfirmOverride(a.id)}>
+                      <Text style={styles.chipText}>{a.label}</Text>
+                    </Pressable>
+                  ))}
+              </View>
             </Animated.View>
           )}
 
-          {/* ── Active: question dots ── */}
-          {phase === 'active' && (
-            <View style={styles.dots}>
-              {MOCK_QUESTIONS.map((_, i) => (
-                <View
-                  key={i}
-                  style={[styles.dot, i <= currentQ ? styles.dotActive : styles.dotInactive]}
-                />
-              ))}
-            </View>
+          {/* ── Active: 질문 + 입력 ── */}
+          {phase === 'active' && !isConfirming && genesis.currentQuestion && (
+            <Animated.View style={[styles.questionCard, qCardStyle]}>
+              <Text style={styles.questionText}>{genesis.currentQuestion.prompt}</Text>
+
+              {genesis.inputMode === 'voice' ? (
+                <>
+                  <Animated.Text style={[styles.micText, micStyle]}>🎙️ 듣고 있어요...</Animated.Text>
+                  {genesis.act === 1 ? (
+                    <Pressable style={styles.confirmYesBtn} onPress={() => handleQuickReply('응 알겠어')}>
+                      <Text style={styles.confirmYesText}>말했어, 다음으로 →</Text>
+                    </Pressable>
+                  ) : (
+                    <View style={styles.chipRow}>
+                      {genesis.currentQuestion.archetypes.map((a) => (
+                        <Pressable key={a.id} style={styles.chip} onPress={() => handleQuickReply(a.keywords[0] ?? a.label)}>
+                          <Text style={styles.chipText}>🎙️ {a.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable onPress={genesis.switchToTyping}>
+                    <Text style={styles.switchModeText}>말로 하기 어려우면 적어줘도 돼 ⌨️</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <TextInput
+                    value={typedText}
+                    onChangeText={setTypedText}
+                    placeholder="편하게 적어줘..."
+                    placeholderTextColor="rgba(226,232,240,0.4)"
+                    style={styles.textInput}
+                    multiline
+                  />
+                  <Pressable style={styles.confirmYesBtn} onPress={handleSubmitTyped}>
+                    <Text style={styles.confirmYesText}>보내기</Text>
+                  </Pressable>
+                  <Pressable onPress={genesis.switchToVoice}>
+                    <Text style={styles.switchModeText}>🎙️ 다시 말로 할게</Text>
+                  </Pressable>
+                </>
+              )}
+            </Animated.View>
           )}
 
           {/* ── Completed: tick ── */}
@@ -369,7 +373,10 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
             <Animated.View style={[styles.completionBox, tickStyle]}>
               <Text style={styles.completionEmoji}>✅</Text>
               <Text style={styles.completionText}>
-                {'AI 정확도가 95%로 상승했어요!\n트윈이가 당신을 훨씬 잘 이해해요.'}
+                {'안녕, 나는 너야 ㅋㅋㅋ\nAI 정확도가 95%로 상승했어요!'}
+              </Text>
+              <Text style={styles.completionSubText}>
+                설정 &gt; 마이 트윈 AI에서 내 오라 해설을 확인해봐 🎨
               </Text>
             </Animated.View>
           )}
@@ -377,7 +384,6 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
           {/* ── Incoming: call buttons ── */}
           {phase === 'incoming' && (
             <View style={styles.callBtns}>
-              {/* Decline */}
               <View style={styles.btnCol}>
                 <Animated.View style={[styles.callBtn, styles.declineBtn, declineBtnStyle]}>
                   <Pressable onPress={handleDecline} style={styles.btnTouchable}>
@@ -387,7 +393,6 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
                 <Text style={styles.btnLabel}>거절</Text>
               </View>
 
-              {/* Accept */}
               <View style={styles.btnCol}>
                 <View style={styles.acceptWrapper}>
                   <Animated.View style={[styles.ring, ring2Style]} />
@@ -403,7 +408,6 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
             </View>
           )}
 
-          {/* ── Active: end call ── */}
           {phase === 'active' && (
             <Pressable onPress={handleDecline} style={styles.endCallBtn}>
               <Text style={styles.endCallText}>📵  통화 종료</Text>
@@ -411,7 +415,9 @@ export default function InterviewCallModal({ visible, onCompleted, onClose }: Pr
           )}
 
         </Animated.View>
+        </ScrollView>
       </Animated.View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -420,177 +426,79 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(10,13,26,0.97)',
+  },
+  scrollContent: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
+    paddingVertical: 40,
   },
   card: {
     width: '100%',
     alignItems: 'center',
     gap: 16,
-    paddingVertical: 52,
+    paddingVertical: 20,
     paddingHorizontal: 24,
   },
-  avatarRing: {
-    width: 116,
-    height: 116,
-    borderRadius: 58,
-    padding: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  avatarInner: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: Colors.CARD_DARK_SLATE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarEmoji: { fontSize: 54 },
-  callerName: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#F1F5F9',
-    letterSpacing: -0.3,
-  },
-  statusText: {
-    fontSize: 14,
-    color: Colors.TEXT_MUTED,
-    letterSpacing: 0.2,
-  },
+  callerName: { fontSize: 22, fontWeight: '700', color: '#F1F5F9', letterSpacing: -0.3 },
+  statusText: { fontSize: 14, color: Colors.TEXT_MUTED, letterSpacing: 0.2 },
   progressTrack: {
-    width: '100%',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    overflow: 'hidden',
-    marginTop: 4,
+    width: '100%', height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 4,
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
+  progressFill: { height: '100%', borderRadius: 2, overflow: 'hidden' },
   questionCard: {
     width: '100%',
     backgroundColor: Colors.CARD_DARK_SLATE,
     borderRadius: 16,
     padding: 20,
-    gap: 10,
+    gap: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(124,58,237,0.35)',
   },
-  questionText: {
-    fontSize: 15,
-    color: '#F1F5F9',
-    fontWeight: '500',
-    lineHeight: 23,
-    fontStyle: 'italic',
+  confirmLabel: { fontSize: 12, color: Colors.TEXT_MUTED, fontWeight: '600' },
+  questionText: { fontSize: 15, color: '#F1F5F9', fontWeight: '500', lineHeight: 23, fontStyle: 'italic' },
+  micText: { fontSize: 13, color: '#22C55E', fontWeight: '600', marginTop: 2 },
+  switchModeText: { fontSize: 12, color: Colors.TEXT_MUTED, textAlign: 'center', marginTop: 4, textDecorationLine: 'underline' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20,
+    backgroundColor: 'rgba(124,58,237,0.18)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.4)',
   },
-  questionHint: {
-    fontSize: 12,
-    color: Colors.TEXT_MUTED,
-  },
-  micText: {
-    fontSize: 13,
-    color: '#22C55E',
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  dots: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: { backgroundColor: Colors.GRADIENT_START },
-  dotInactive: { backgroundColor: 'rgba(255,255,255,0.15)' },
-  completionBox: {
-    alignItems: 'center',
-    gap: 14,
-    marginTop: 8,
-  },
-  completionEmoji: { fontSize: 64 },
-  completionText: {
-    fontSize: 15,
-    color: '#F1F5F9',
-    fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  callBtns: {
-    flexDirection: 'row',
-    gap: 88,
-    marginTop: 36,
-    alignItems: 'flex-start',
-  },
-  btnCol: {
-    alignItems: 'center',
-    gap: 10,
-  },
-  acceptWrapper: {
-    width: BTN_SIZE,
-    height: BTN_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ring: {
-    position: 'absolute',
-    width: BTN_SIZE,
-    height: BTN_SIZE,
-    borderRadius: BTN_SIZE / 2,
-    backgroundColor: 'rgba(34,197,94,0.28)',
-  },
-  callBtn: {
-    width: BTN_SIZE,
-    height: BTN_SIZE,
-    borderRadius: BTN_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 18,
-    elevation: 10,
-  },
-  acceptBtn: {
+  chipText: { fontSize: 13, color: '#E9D5FF', fontWeight: '500' },
+  confirmRow: { flexDirection: 'row', gap: 10 },
+  confirmYesBtn: {
+    alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20,
     backgroundColor: '#22C55E',
-    shadowColor: '#22C55E',
-    shadowOpacity: 0.55,
   },
-  declineBtn: {
-    backgroundColor: Colors.ALERT_SIREN_RED,
-    shadowColor: Colors.ALERT_SIREN_RED,
-    shadowOpacity: 0.45,
+  confirmYesText: { fontSize: 14, color: '#052e13', fontWeight: '700' },
+  confirmOtherLabel: { fontSize: 12, color: Colors.TEXT_MUTED, marginTop: 2 },
+  textInput: {
+    minHeight: 60, maxHeight: 120, color: '#F1F5F9', fontSize: 15,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },
-  btnTouchable: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: BTN_SIZE / 2,
+  completionBox: { alignItems: 'center', gap: 14, marginTop: 8 },
+  completionEmoji: { fontSize: 64 },
+  completionText: { fontSize: 15, color: '#F1F5F9', fontWeight: '500', textAlign: 'center', lineHeight: 22 },
+  completionSubText: { fontSize: 12, color: Colors.TEXT_MUTED, textAlign: 'center', marginTop: -4 },
+  callBtns: { flexDirection: 'row', gap: 88, marginTop: 36, alignItems: 'flex-start' },
+  btnCol: { alignItems: 'center', gap: 10 },
+  acceptWrapper: { width: BTN_SIZE, height: BTN_SIZE, alignItems: 'center', justifyContent: 'center' },
+  ring: { position: 'absolute', width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2, backgroundColor: 'rgba(34,197,94,0.28)' },
+  callBtn: {
+    width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2, alignItems: 'center', justifyContent: 'center',
+    shadowOffset: { width: 0, height: 0 }, shadowRadius: 18, elevation: 10,
   },
+  acceptBtn: { backgroundColor: '#22C55E', shadowColor: '#22C55E', shadowOpacity: 0.55 },
+  declineBtn: { backgroundColor: Colors.ALERT_SIREN_RED, shadowColor: Colors.ALERT_SIREN_RED, shadowOpacity: 0.45 },
+  btnTouchable: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderRadius: BTN_SIZE / 2 },
   callIcon: { fontSize: 28 },
-  btnLabel: {
-    fontSize: 13,
-    color: Colors.TEXT_MUTED,
-    fontWeight: '500',
-  },
+  btnLabel: { fontSize: 13, color: Colors.TEXT_MUTED, fontWeight: '500' },
   endCallBtn: {
-    marginTop: 36,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 28,
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.4)',
+    marginTop: 24, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 28,
+    backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)',
   },
-  endCallText: {
-    fontSize: 15,
-    color: Colors.ALERT_SIREN_RED,
-    fontWeight: '600',
-  },
+  endCallText: { fontSize: 15, color: Colors.ALERT_SIREN_RED, fontWeight: '600' },
 });

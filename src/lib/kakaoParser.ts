@@ -56,14 +56,49 @@ function maskSensitive(text: string): [string, number] {
 
 // ── KakaoTalk line classifier ─────────────────────────────────────────────────
 //
-// KakaoTalk export format (each message block):
-//   [이름] [오전/오후 HH:MM] message content
+// Two export formats are supported:
+//   iOS:         [이름] [오전/오후 HH:MM] message content
+//   Android/PC:  2024. 6. 15. 오후 11:23, 이름 : message content
 //
 // System lines (date headers, entry/exit notices) look like:
 //   --------------- 2024년 1월 1일 월요일 ---------------
 //   홍길동 님이 들어왔습니다.
 
-const KAKAO_MSG_RE = /^\[(.+?)\] \[(?:오전|오후) \d{1,2}:\d{2}\] (.*)$/;
+const IOS_MSG_RE = /^\[(.+?)\] \[(오전|오후) (\d{1,2}):(\d{2})\] (.*)$/;
+const ANDROID_MSG_RE =
+  /^\d{4}\.\s?\d{1,2}\.\s?\d{1,2}\.\s?(오전|오후)\s?(\d{1,2}):(\d{2}),\s?(.+?)\s?:\s?(.*)$/;
+
+export interface ParsedKakaoLine {
+  speaker: string;
+  content: string;
+  hour: number;   // 24h
+  minute: number;
+}
+
+function to24h(ampm: string, hourStr: string): number {
+  let h = parseInt(hourStr, 10);
+  if (ampm === '오후' && h < 12) h += 12;
+  if (ampm === '오전' && h === 12) h = 0;
+  return h;
+}
+
+// Parses a single raw line from either export format. Returns null for
+// system lines (date headers, join/exit notices) that carry no message.
+export function parseKakaoLine(raw: string): ParsedKakaoLine | null {
+  const ios = raw.match(IOS_MSG_RE);
+  if (ios) {
+    const [, speaker, ampm, hourStr, minStr, content] = ios;
+    return { speaker, content, hour: to24h(ampm, hourStr), minute: parseInt(minStr, 10) };
+  }
+
+  const android = raw.match(ANDROID_MSG_RE);
+  if (android) {
+    const [, ampm, hourStr, minStr, speaker, content] = android;
+    return { speaker: speaker.trim(), content, hour: to24h(ampm, hourStr), minute: parseInt(minStr, 10) };
+  }
+
+  return null;
+}
 
 // ── Signature drip extraction ─────────────────────────────────────────────────
 //
@@ -105,23 +140,21 @@ export function parseKakaoExport(
   let totalMasked = 0;
 
   for (const raw of lines) {
-    const match = raw.match(KAKAO_MSG_RE);
+    const parsed = parseKakaoLine(raw);
 
-    if (!match) {
+    if (!parsed) {
       // System line (date header, join/exit notice) — skip silently
       continue;
     }
 
-    const [, speaker, content] = match;
-
-    if (speaker !== myName) {
+    if (parsed.speaker !== myName) {
       // Partner's line — DROP entirely, never process further
       droppedPartnerLines++;
       continue;
     }
 
     // Own line — mask sensitive data
-    const [sanitised, masked] = maskSensitive(content);
+    const [sanitised, masked] = maskSensitive(parsed.content);
     totalMasked += masked;
     myLines.push(sanitised);
   }
@@ -147,9 +180,6 @@ export function maskPII(text: string): string {
 // Extracts ChatStyleProfile from a KakaoTalk export by analysing only the
 // user's own messages. No partner data is read.
 
-const KAKAO_TIMED_LINE_RE =
-  /^\[(.+?)\] \[(오전|오후) (\d{1,2}):(\d{2})\] (.*)$/;
-
 export function analyzeChatRhythm(
   rawText: string,
   myName: string,
@@ -163,19 +193,12 @@ export function analyzeChatRhythm(
   const msgs: TimedMsg[] = [];
 
   for (const raw of rawText.split('\n')) {
-    const m = raw.match(KAKAO_TIMED_LINE_RE);
-    if (!m) continue;
-    const [, speaker, ampm, hourStr, minStr, content] = m;
-    if (speaker !== myName) continue;
+    const parsed = parseKakaoLine(raw);
+    if (!parsed || parsed.speaker !== myName) continue;
 
-    let h = parseInt(hourStr, 10);
-    const mn = parseInt(minStr, 10);
-    if (ampm === '오후' && h < 12) h += 12;
-    if (ampm === '오전' && h === 12) h = 0;
-
-    const minuteOfDay = h * 60 + mn;
-    const charCount = content.replace(/\s/g, '').length;
-    const ending = content.trimEnd().slice(-3).trim();
+    const minuteOfDay = parsed.hour * 60 + parsed.minute;
+    const charCount = parsed.content.replace(/\s/g, '').length;
+    const ending = parsed.content.trimEnd().slice(-3).trim();
     msgs.push({ minuteOfDay, charCount, ending });
   }
 

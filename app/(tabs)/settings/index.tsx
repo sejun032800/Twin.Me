@@ -2340,6 +2340,14 @@ function AccountCenterSection({ t }: { t: ThemeTokens }) {
       desc: 'Google · Kakao · Naver · Apple 연동 및 데이터 동기화',
       route: '/settings/account-link',
     },
+    {
+      id: 'twin-ai',
+      emoji: '🔮',
+      bg: 'rgba(217,70,239,0.15)',
+      label: '마이 트윈 AI 관리 센터',
+      desc: '제네시스 인터뷰 결과 · 성향 오라 해설 · 재인터뷰',
+      route: '/settings/twin-ai',
+    },
   ];
 
   return (

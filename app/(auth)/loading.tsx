@@ -13,6 +13,7 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext } from '../../src/context/AppContext';
 import { analyzeChatRhythm, parseKakaoExport } from '../../src/lib/kakaoParser';
+import { buildUserToneVector } from '../../src/lib/userToneVectorBuilder';
 import {
   generateBaseScore,
   getMBTICompatibilityGrade,
@@ -274,6 +275,7 @@ export default function LoadingScreen() {
     hasCompletedInterview,
     setTrainingResult,
     setChatStyleProfile,
+    setUserToneVector,
     rawKakaoText,
     setRawKakaoText,
     setBaseScore,
@@ -364,6 +366,9 @@ export default function LoadingScreen() {
               myLineCount: parsed.myLines.length,
               maskedCount: parsed.maskedCount,
             });
+            // Chat_logic.md — build the structured User_Tone_Vector from the
+            // same "my lines only" corpus already produced by parseKakaoExport.
+            setUserToneVector(buildUserToneVector(parsed.myLines));
 
             // ── DNA 일치율 초기 점수 연산 (SRS §1-2) ─────────────────────────
             const mbtiGrade = getMBTICompatibilityGrade(

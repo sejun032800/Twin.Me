@@ -40,6 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { maskPII, useAppContext } from '../../src/context/AppContext';
 import { runKakaoSyncPipeline } from '../../src/services/kakaoUploadService';
 import { ChatStyleProfile } from '../../src/lib/kakaoParser';
+import { updateToneVectorEMA } from '../../src/lib/userToneVectorBuilder';
 import { requestSelfAiLlmResponse, requestToneRegeneration, generateTwinResponse, type ChatHistoryItem } from '../../src/services/selfAiService';
 import { useChatStream, ChatStreamReturn, ToneAlert, SensitiveInterceptResult } from '../../src/hooks/useChatStream';
 import { useReportScheduler } from '../../src/hooks/useReportScheduler';
@@ -1626,6 +1627,8 @@ function ChatRoomView({
 }) {
   const {
     chatStyleProfile, setChatStyleProfile, privacyLevel,
+    userToneVector, setUserToneVector,
+    personaMatrix,
     isEarlyDatingMode, setIsEarlyDatingMode,
     roomEarlyModeMap, setRoomEarlyMode,
     myProfile, trainingResult,
@@ -1655,6 +1658,8 @@ function ChatRoomView({
   const isRoomEarlyMode = roomEarlyModeMap[roomType] ?? false;
   const profileRef = useRef<ChatStyleProfile>(chatStyleProfile);
   useEffect(() => { profileRef.current = chatStyleProfile; }, [chatStyleProfile]);
+  const toneVectorRef = useRef(userToneVector);
+  useEffect(() => { toneVectorRef.current = userToneVector; }, [userToneVector]);
 
   const roomConfig = {
     partner: { name: partnerName, emoji: '❤️', badge: null as string | null, status: '실제 연인 채팅방', isReal: true },
@@ -2022,6 +2027,8 @@ function ChatRoomView({
           myProfile,
           trainingResult,
           chatStyleProfile: profile,
+          userToneVector: toneVectorRef.current,
+          personaMatrix,
           isEarlyDatingMode,
           isRoomEarlyMode,
           privacyLevel,
@@ -2046,7 +2053,7 @@ function ChatRoomView({
       }, delay);
       cum += calcBubbleDelay(part, profile);
     });
-  }, [addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel]);
+  }, [addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel, personaMatrix]);
 
   const applyRollingAverage = useCallback((text: string, gapMs: number) => {
     const p = profileRef.current;
@@ -2059,6 +2066,15 @@ function ChatRoomView({
     if (ending.length > 0 && !pats.includes(ending)) pats = [ending, ...pats].slice(0, 5);
     setChatStyleProfile({ burstInterval: newBurst, avgCharsPerBubble: newAvg, typingSpeedFactor: newSpeed, splitTriggerPatterns: pats });
   }, [setChatStyleProfile]);
+
+  // Chat_logic.md §5.1 — same trigger as applyRollingAverage, but updates the
+  // structured User_Tone_Vector (laughter/endings/drips/emoji/lexical) via EMA.
+  // Only called when privacyLevel === 3 (§5.2 Lv3 완전복제); Lv2/Lv1 freeze this.
+  const applyToneVectorLearning = useCallback((text: string) => {
+    const current = toneVectorRef.current;
+    if (!current) return;
+    setUserToneVector(updateToneVectorEMA(current, [text]));
+  }, [setUserToneVector]);
 
   // ── Twin Response Logic: 채널 라우팅 (WARN/ADVISE/NOTIFY) ────────────────────
   // evaluateIntervention()이 게이트를 통과시킨 코드에 한해서만 실제 유저 대면
@@ -2083,6 +2099,8 @@ function ChatRoomView({
         myProfile,
         trainingResult,
         chatStyleProfile: profileRef.current,
+        userToneVector: toneVectorRef.current,
+        personaMatrix,
         isEarlyDatingMode,
         isRoomEarlyMode,
         privacyLevel,
@@ -2109,7 +2127,7 @@ function ChatRoomView({
   }, [
     evaluateIntervention, rapidSwingActive, overflowStatus, setTriggerMirrorMode,
     myProfile, trainingResult, isEarlyDatingMode, isRoomEarlyMode, privacyLevel,
-    streamState, setSelfAiNotifyQueue,
+    streamState, setSelfAiNotifyQueue, personaMatrix,
   ]);
 
   // ── Twin Response Logic — 경로 B(인앱 실시간 스트림) 버퍼 flush ──────────────
@@ -2188,7 +2206,9 @@ function ChatRoomView({
     }
 
     if (!config.isReal && gap > 200 && gap < 10_000 && privacyLevel === 3) {
-      applyRollingAverage(maskPII(text), gap);
+      const masked = maskPII(text);
+      applyRollingAverage(masked, gap);
+      applyToneVectorLearning(masked);
     }
     if (config.isReal) return;
 
@@ -2199,7 +2219,7 @@ function ChatRoomView({
       pendingMessages.current = [];
       triggerAIReply(batch);
     }, profileRef.current.burstInterval);
-  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, privacyLevel, roomType, streamState, runCrisisAnalysis, flushDetectionBuffer]);
+  }, [addMessage, triggerAIReply, config.isReal, applyRollingAverage, applyToneVectorLearning, privacyLevel, roomType, streamState, runCrisisAnalysis, flushDetectionBuffer]);
 
   // ── [Step #20] Sensitive intercept → modal → [force send] or [revise] ────────
   const handleSend = useCallback(() => {
@@ -2255,6 +2275,8 @@ function ChatRoomView({
           myProfile,
           trainingResult,
           chatStyleProfile: profileRef.current,
+          userToneVector: toneVectorRef.current,
+          personaMatrix,
           isEarlyDatingMode,
           isRoomEarlyMode,
           privacyLevel,
@@ -2274,7 +2296,7 @@ function ChatRoomView({
     } finally {
       setIsToneRegenerating(false);
     }
-  }, [interceptResult, addMessage, myProfile, trainingResult, isEarlyDatingMode, isRoomEarlyMode, privacyLevel]);
+  }, [interceptResult, addMessage, myProfile, trainingResult, isEarlyDatingMode, isRoomEarlyMode, privacyLevel, personaMatrix]);
 
   const handleChangeText = useCallback((text: string) => {
     setInputText(text);
@@ -2320,6 +2342,8 @@ function ChatRoomView({
           myProfile,
           trainingResult,
           chatStyleProfile: profileRef.current,
+          userToneVector: toneVectorRef.current,
+          personaMatrix,
           isEarlyDatingMode,
           isRoomEarlyMode,
           privacyLevel,
@@ -2341,7 +2365,7 @@ function ChatRoomView({
       }, 1200);
     }
     setSelectedMessage(null);
-  }, [correctionCount, nudgeTriggered, selectedMessage, addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel]);
+  }, [correctionCount, nudgeTriggered, selectedMessage, addMessage, roomType, isEarlyDatingMode, isRoomEarlyMode, myProfile, trainingResult, privacyLevel, personaMatrix]);
 
   const currentToneAlert = roomType === 'ai' && streamState.pendingToneAlerts.length > 0
     ? streamState.pendingToneAlerts[0]

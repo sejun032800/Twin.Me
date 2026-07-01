@@ -14,6 +14,10 @@
 
 import type { TrainingResult, UserProfile, PrivacyLevel } from '../context/AppContext';
 import type { ChatStyleProfile } from '../lib/kakaoParser';
+import type { UserToneVector } from '../lib/userToneVectorBuilder';
+import { buildToneVectorPromptSection } from '../lib/userToneVectorBuilder';
+import type { UserPersonaMatrix } from '../types/genesis';
+import { buildPersonaBlendPromptSection } from '../engine/genesisBlending';
 
 // ── Environment config ────────────────────────────────────────────────────────
 // Set via .env.local:
@@ -39,6 +43,12 @@ export interface SelfAiContext {
   myProfile: UserProfile;
   trainingResult: TrainingResult | null;
   chatStyleProfile: ChatStyleProfile;
+  // Chat_logic.md — structured tone profile (laughter/endings/drips/emoji/lexical).
+  // Supersedes trainingResult.drips/tags when present; falls back gracefully if null.
+  userToneVector?: UserToneVector | null;
+  // 트윈 제네시스 인터뷰 엔진 (FUN-HOM-001 Override) 산출물 — 3채널 블렌딩된
+  // 트윈 성격(말투/감정/태도). 인터뷰 미완료(null)면 디폴트 톤 유지.
+  personaMatrix?: UserPersonaMatrix | null;
   isEarlyDatingMode: boolean;
   // Room-level toggle (Step #19) — when true, injects a stronger critical guard-rail
   // prompt and sets isRoomEarlyMode:true in the backend request payload.
@@ -93,7 +103,7 @@ function checkAndIncrementCap(isPremiumDeep: boolean): void {
 // Privacy level gates how much context is shared with the model.
 
 export function buildPersonaSystemPrompt(ctx: SelfAiContext): string {
-  const { myProfile, trainingResult, isEarlyDatingMode, privacyLevel, roomType } = ctx;
+  const { myProfile, trainingResult, isEarlyDatingMode, privacyLevel, roomType, userToneVector } = ctx;
 
   if (roomType === 'analyst') {
     return [
@@ -152,10 +162,21 @@ export function buildPersonaSystemPrompt(ctx: SelfAiContext): string {
     lines.push(`- 에니어그램: ${myProfile.enneagram}번`);
   }
 
+  // FUN-HOM-001 Override — 제네시스 인터뷰로 확정된 트윈 성격 블렌딩 지침 주입
+  if (ctx.personaMatrix?.enneagramType) {
+    lines.push('', '## 트윈 성격 블렌딩 (제네시스 인터뷰 결과)');
+    lines.push(buildPersonaBlendPromptSection(ctx.personaMatrix.blend));
+  }
+
   // Lv 2+ allows tone/keyword context (User_Tone_Vector injection)
   if (trainingResult && privacyLevel >= 2) {
     lines.push('', '## 학습된 말투 유전자 (카카오톡 User_Tone_Vector 분석 결과)');
-    if (trainingResult.drips.length > 0) {
+
+    if (userToneVector) {
+      // Chat_logic.md §4.1 — structured feature profile (laughter/endings/drips/emoji/lexical)
+      lines.push(buildToneVectorPromptSection(userToneVector));
+    } else if (trainingResult.drips.length > 0) {
+      // Fallback for personas built before the tone-vector engine ran
       lines.push(`- 시그니처 드립 / 자주 쓰는 표현: ${trainingResult.drips.join(', ')}`);
       lines.push('  → 위 표현을 답변에 자연스럽게 섞어 내 말투를 완벽히 복제하세요.');
     }

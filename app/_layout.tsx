@@ -9,6 +9,7 @@ import { Colors } from '../src/styles/theme';
 import { AppProvider } from '../src/context/AppContext';
 import { CustomThemeProvider } from '../src/context/CustomThemeContext';
 import { bootstrapNotifications } from '../src/services/localNotificationService';
+import AuraMeshBackground from '../src/components/aura/AuraMeshBackground';
 
 // Keep splash visible until fonts are loaded
 SplashScreen.preventAutoHideAsync();
@@ -48,7 +49,8 @@ export default function RootLayout() {
       <AppProvider>
         <CustomThemeProvider>
           <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
+          <AuraMeshBackground />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="highlight-gallery" />

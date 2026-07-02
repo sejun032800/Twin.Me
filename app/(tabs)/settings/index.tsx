@@ -22,6 +22,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   UIManager,
@@ -211,6 +212,81 @@ const tS = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: FontWeight.medium,
   },
+});
+
+// ─── 나의 연애 색 (Aura Theme Engine 미리보기) ───────────────────────────────────
+// 전체 해설(§8.4 Why My Aura)은 /settings/twin-ai에 이미 구현되어 있으므로,
+// 여기서는 6색 스와치 요약 + 오라 접근성 토글만 다루고 탭하면 해설 페이지로 이동한다.
+
+function AuraPreviewSection({
+  t,
+  auraVector,
+  reduceAuraMotion,
+  onToggleReduceAuraMotion,
+  onOpenDetail,
+}: {
+  t: ThemeTokens;
+  auraVector: import('../../../src/types/genesis').AuraVector | null | undefined;
+  reduceAuraMotion: boolean;
+  onToggleReduceAuraMotion: (v: boolean) => void;
+  onOpenDetail: () => void;
+}) {
+  return (
+    <View style={[tS.card, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+      <View style={tS.cardHeader}>
+        <Text style={[tS.cardTitle, { color: t.text }]}>🎨 나의 연애 색</Text>
+      </View>
+      <Text style={[tS.cardSub, { color: t.textSecondary }]}>
+        {auraVector
+          ? '인터뷰에서 드러난 6가지 성향이 만든 나만의 오라예요. 앱 배경에 은은하게 스며들어요.'
+          : '제네시스 인터뷰를 완료하면 나만의 6색 오라가 앱 전체 배경에 스며들어요.'}
+      </Text>
+
+      <Pressable onPress={onOpenDetail} style={auraS.swatchRow}>
+        {(auraVector?.meshStops ?? Array.from({ length: 6 })).map((stop, i) => (
+          <View
+            key={i}
+            style={[
+              auraS.swatch,
+              {
+                backgroundColor: stop
+                  ? `hsl(${stop.hue}, ${stop.saturation}%, ${stop.lightness}%)`
+                  : 'rgba(148,163,184,0.25)',
+              },
+            ]}
+          />
+        ))}
+        <Text style={[auraS.swatchArrow, { color: t.textMuted }]}>›</Text>
+      </Pressable>
+
+      <View style={[auraS.a11yRow, { borderTopColor: t.cardBorder }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[auraS.a11yTitle, { color: t.text }]}>오라 모션 줄이기</Text>
+          <Text style={[auraS.a11yDesc, { color: t.textMuted }]}>
+            은은한 배경 애니메이션(호흡·흐름)을 끄고 정적인 화면으로 표시해요.
+          </Text>
+        </View>
+        <Switch
+          value={reduceAuraMotion}
+          onValueChange={onToggleReduceAuraMotion}
+          trackColor={{ false: t.chipBg, true: Colors.GRADIENT_START }}
+          thumbColor="#FFF"
+        />
+      </View>
+    </View>
+  );
+}
+
+const auraS = StyleSheet.create({
+  swatchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  swatch: { flex: 1, height: 28, borderRadius: Radius.sm },
+  swatchArrow: { fontSize: 22, fontWeight: '300' },
+  a11yRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.sm, marginTop: 2,
+  },
+  a11yTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  a11yDesc: { fontSize: FontSize.xs, marginTop: 2, lineHeight: 16 },
 });
 
 // ─── Privacy Slider (FUN-SET-001) ────────────────────────────────────────────
@@ -3164,8 +3240,9 @@ const ftS = StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-  const { themeTokens, themeMode, setThemeMode } = useAppContext();
+  const { themeTokens, themeMode, setThemeMode, personaMatrix, reduceAuraMotion, setReduceAuraMotion } = useAppContext();
   const t = themeTokens;
+  const router = useRouter();
 
   const [privacySyncError, setPrivacySyncError] = useState(false);
   const [showThemeShop, setShowThemeShop] = useState(false);
@@ -3217,7 +3294,7 @@ export default function SettingsScreen() {
   }, [privacySyncError]);
 
   return (
-    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: t.bg }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: 'transparent' }]}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -3236,6 +3313,17 @@ export default function SettingsScreen() {
         <View style={styles.sectionBlock}>
           <Text style={[styles.sectionTitle, { color: t.textMuted }]}>커스텀 테마</Text>
           <ThemeShopEntryCard t={t} onPress={() => setShowThemeShop(true)} />
+        </View>
+
+        <View style={styles.sectionBlock}>
+          <Text style={[styles.sectionTitle, { color: t.textMuted }]}>나의 연애 색</Text>
+          <AuraPreviewSection
+            t={t}
+            auraVector={personaMatrix?.auraVector}
+            reduceAuraMotion={reduceAuraMotion}
+            onToggleReduceAuraMotion={setReduceAuraMotion}
+            onOpenDetail={() => router.push('/settings/twin-ai')}
+          />
         </View>
 
         <View ref={refPrivacy} collapsable={false} style={styles.sectionBlock}>

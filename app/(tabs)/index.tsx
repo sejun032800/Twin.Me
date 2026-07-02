@@ -415,7 +415,7 @@ export default function HomeScreen() {
   }, [highlightUnlocking, oneTimeHighlightUnlocked, setOneTimeHighlightUnlocked]);
 
   return (
-    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: t.bg }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: 'transparent' }]}>
 
       {/* ── 0순위: 오버플로우 경고 배너 (FUN-HOM-002) ── */}
       {overflowStatus !== 'NONE' && (

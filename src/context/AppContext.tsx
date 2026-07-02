@@ -17,6 +17,7 @@ import {
   clearUserToneVector,
 } from '../services/userToneVectorStore';
 import type { UserPersonaMatrix } from '../types/genesis';
+export type AuraScreenVariant = 'helix' | 'twinRoom' | null;
 import {
   loadPersonaMatrix,
   savePersonaMatrix,
@@ -24,6 +25,7 @@ import {
   loadLastGenesisAt,
   saveLastGenesisAt,
 } from '../services/personaMatrixStore';
+import { loadReduceAuraMotion, saveReduceAuraMotion } from '../services/auraSettingsStore';
 import {
   FALLBACK_MOOD_TAGS,
   PartnerAiMoodTag,
@@ -238,6 +240,13 @@ interface AppContextValue {
   lastGenesisAt: string | null;
   canRequestRegenesis: boolean;
   requestRegenesis: () => void;
+  // 6색 성향 테마 엔진 (Aura Theme Engine) — 화면별 가중치 오버라이드 + 접근성 토글.
+  // helix/twinRoom variant는 personaMatrix.auraVector와 별개로 "지금 어떤 화면
+  // 컨텍스트에 있는지"만 알려준다 — 실제 색상 산출은 auraEngine.ts가 전담.
+  auraScreenVariant: AuraScreenVariant;
+  setAuraScreenVariant: (v: AuraScreenVariant) => void;
+  reduceAuraMotion: boolean;
+  setReduceAuraMotion: (v: boolean) => void;
   // Privacy control (FUN-SET-001)
   privacyLevel: PrivacyLevel;
   setPrivacyLevel: (level: PrivacyLevel) => void;
@@ -469,6 +478,10 @@ const AppContext = createContext<AppContextValue>({
   lastGenesisAt: null,
   canRequestRegenesis: true,
   requestRegenesis: () => {},
+  auraScreenVariant: null,
+  setAuraScreenVariant: () => {},
+  reduceAuraMotion: false,
+  setReduceAuraMotion: () => {},
   privacyLevel: 3,
   setPrivacyLevel: () => {},
   dateCourses: MOCK_COURSES,
@@ -571,6 +584,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [userToneVector, setUserToneVectorState] = useState<UserToneVector | null>(null);
   const [personaMatrix, setPersonaMatrixState] = useState<UserPersonaMatrix | null>(null);
   const [lastGenesisAt, setLastGenesisAt] = useState<string | null>(null);
+  const [auraScreenVariant, setAuraScreenVariant] = useState<AuraScreenVariant>(null);
+  const [reduceAuraMotion, setReduceAuraMotionState] = useState(false);
+  useEffect(() => {
+    loadReduceAuraMotion().then(setReduceAuraMotionState);
+  }, []);
+  const setReduceAuraMotion = (v: boolean) => {
+    setReduceAuraMotionState(v);
+    saveReduceAuraMotion(v);
+  };
   const [privacyLevel, setPrivacyLevel] = useState<PrivacyLevel>(3);
   const [dateCourses, setDateCourses] = useState<DateCourse[]>(MOCK_COURSES);
   const [triggerAddCourse, setTriggerAddCourse] = useState(false);
@@ -1143,6 +1165,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         lastGenesisAt,
         canRequestRegenesis,
         requestRegenesis,
+        auraScreenVariant,
+        setAuraScreenVariant,
+        reduceAuraMotion,
+        setReduceAuraMotion,
         privacyLevel,
         setPrivacyLevel,
         dateCourses,

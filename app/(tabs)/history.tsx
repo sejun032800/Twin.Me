@@ -3301,7 +3301,7 @@ function DateMapView({ t }: { t: ThemeTokens }) {
   const MUSE_FAB_BOTTOM   = PHOTO_FAB_BOTTOM + 62;
 
   return (
-    <View style={[mapV.root, { backgroundColor: t.bg }]}>
+    <View style={[mapV.root, { backgroundColor: 'transparent' }]}>
       {/* ── Map canvas ── */}
       <View style={[mapV.mapContainer, { height: MAP_H }]}>
         <HistoryKakaoMapView
@@ -4968,7 +4968,7 @@ function HistoryScreenContent() {
   ];
 
   return (
-    <SafeAreaView edges={['top']} style={[screenS.root, { backgroundColor: t.bg }]}>
+    <SafeAreaView edges={['top']} style={[screenS.root, { backgroundColor: 'transparent' }]}>
       <View ref={refHeader} collapsable={false}>
         <ScreenHeader t={t} />
       </View>

@@ -2374,7 +2374,7 @@ function ChatRoomView({
   const crisisActive = crisisResult?.crisisActive ?? false;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]} edges={['top']}>
       {/* Step #23: Red neon pulse border — renders behind all content */}
       <CrisisPulseBorder visible={crisisActive} />
 
@@ -2733,7 +2733,7 @@ function DMListView({
   ];
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]} edges={['top']}>
       <View style={styles.listHeader}>
         <Text style={[styles.listTitle, { color: t.text }]}>채팅</Text>
         <EarlyModeToggle value={isEarlyDatingMode} onChange={setIsEarlyDatingMode} label="연애 초기 모드" t={t} />
@@ -2803,7 +2803,7 @@ function DMListView({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
-  const { partnerProfile, themeTokens } = useAppContext();
+  const { partnerProfile, themeTokens, setAuraScreenVariant } = useAppContext();
   const t = themeTokens;
   const partnerName = partnerProfile.name;
   const [activeRoom, setActiveRoom] = useState<RoomType | null>(null);
@@ -2811,6 +2811,12 @@ export default function ChatScreen() {
 
   // Step #22 — weekly report scheduler: cold-start hydration + upload trigger + Sunday 22:00 cron
   useReportScheduler();
+
+  // Aura Theme Engine — "트윈방"(Self-AI/분석가, 룸1=연인 제외) 진입 시 오라 가중치 ×1.2.
+  useEffect(() => {
+    setAuraScreenVariant(activeRoom && activeRoom !== 'partner' ? 'twinRoom' : null);
+    return () => setAuraScreenVariant(null);
+  }, [activeRoom, setAuraScreenVariant]);
 
   const streamState = useChatStream();
 

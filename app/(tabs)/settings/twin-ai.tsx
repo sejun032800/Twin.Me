@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ClayTwinAvatar from '../../../src/components/home/ClayTwinAvatar';
 import InterviewCallModal from '../../../src/components/home/InterviewCallModal';
+import { AuraShareModal } from '../../../src/components/share/AuraShareCard';
 import { useAppContext } from '../../../src/context/AppContext';
 import { auraChannelToCss, AURA_AXIS_DIRECTIONS, toScoreBand } from '../../../src/engine/auraEngine';
 import { getAuraStory } from '../../../src/data/auraStoryPool';
@@ -20,6 +21,7 @@ export default function TwinAiScreen() {
   const router = useRouter();
   const [showInterview, setShowInterview] = useState(false);
   const [showRegenesisConfirm, setShowRegenesisConfirm] = useState(false);
+  const [showAuraShare, setShowAuraShare] = useState(false);
 
   const hasPersona = !!personaMatrix?.enneagramType && !!personaMatrix.auraVector;
 
@@ -123,6 +125,9 @@ export default function TwinAiScreen() {
                   <Text style={[s.auraSummaryText, { color: t.textSecondary }]}>
                     이 색은 지금의 너야. 시간이 지나 네가 변하면, 나도 다시 너를 그릴게. 🪞
                   </Text>
+                  <Pressable style={[s.secondaryBtn, { borderColor: t.cardBorder, marginTop: Spacing.xs }]} onPress={() => setShowAuraShare(true)}>
+                    <Text style={[s.secondaryBtnText, { color: t.text }]}>📤 내 색 카드 공유하기</Text>
+                  </Pressable>
                 </View>
               );
             })()}
@@ -148,6 +153,21 @@ export default function TwinAiScreen() {
         onCompleted={() => {}}
         onClose={() => setShowInterview(false)}
       />
+
+      {hasPersona && personaMatrix?.auraVector && (() => {
+        const dominant = [...AURA_AXES].sort(
+          (a, b) => Math.abs(personaMatrix.auraVector!.axisScores[b]) - Math.abs(personaMatrix.auraVector!.axisScores[a]),
+        )[0];
+        const dominantTitle = getAuraStory(dominant, toScoreBand(personaMatrix.auraVector!.axisScores[dominant])).title;
+        return (
+          <AuraShareModal
+            visible={showAuraShare}
+            onClose={() => setShowAuraShare(false)}
+            meshStops={personaMatrix.auraVector!.meshStops}
+            dominantTitle={dominantTitle}
+          />
+        );
+      })()}
 
       {/* ── 재인터뷰 쿨다운 가드 모달 ── */}
       <Modal transparent animationType="fade" visible={showRegenesisConfirm}>
